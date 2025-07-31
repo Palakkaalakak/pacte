@@ -1,0 +1,6 @@
+{
+  "name": "Price Action Pattern Trainer",
+  "description": "An interactive application for traders to master identifying key candlestick bar types and price action patterns like the Force Strike.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}

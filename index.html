@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Price Action Pattern Trainer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+      @import url('https://rsms.me/inter/inter.css');
+    </style>
+    
+    <!-- Libraries for in-browser module loading and transpilation -->
+    <script src="https://unpkg.com/systemjs@6.14.2/dist/s.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Correct Import Map for SystemJS -->
+    <script type="systemjs-importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "react-dom/": "https://esm.sh/react-dom@^18.2.0/",
+        "react/": "https://esm.sh/react@^18.2.0/",
+        "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime"
+      }
+    }
+    </script>
+
+    <!-- SystemJS configuration to transpile TSX/TS modules with Babel -->
+    <script>
+      (function() {
+        // Get a reference to the original module loader
+        const originalInstantiate = System.instantiate;
+
+        // Override the loader
+        System.instantiate = async function(url, parent) {
+          // We only want to transpile our own source files
+          if (url.endsWith('.ts') || url.endsWith('.tsx')) {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`Could not fetch ${url}`);
+            const source = await res.text();
+            
+            // Transpile from TSX/TS to SystemJS module format
+            const transformed = Babel.transform(source, {
+              presets: ['react', 'typescript'],
+              plugins: ['transform-modules-systemjs'], // Key plugin for this to work
+              filename: url, // For better error messages
+              sourceMaps: 'inline'
+            }).code;
+            
+            let factory;
+            const originalRegister = System.register;
+
+            // The transformed code will call System.register(deps, factoryFn) or System.register(name, deps, factoryFn).
+            // We intercept this call to grab the module factory, which is what the instantiate hook must return.
+            System.register = function(...args) {
+              if (typeof args[0] === 'string') {
+                // Named register: register(name, deps, fn)
+                factory = [args[1], args[2]];
+              } else {
+                // Anonymous register: register(deps, fn)
+                factory = [args[0], args[1]];
+              }
+            };
+
+            // This eval executes the transformed code, which calls our temporary System.register
+            eval(transformed);
+            
+            // Restore the original System.register function
+            System.register = originalRegister;
+            
+            if (!factory) {
+                throw new Error(`Failed to capture module factory for ${url}`);
+            }
+
+            // Return the captured module factory [dependencies, factoryFunction]
+            return factory;
+          }
+          
+          // For all other files (like React from the CDN), use the default loader.
+          return originalInstantiate.call(this, url, parent);
+        };
+
+        // Start loading the application via our new loader setup
+        System.import('./index.tsx').catch(err => {
+            console.error("Failed to load application");
+            console.error(err);
+        });
+      })();
+    </script>
+<!-- 
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+    "react/": "https://esm.sh/react@^19.1.0/"
+  }
+}
+</script>
+-->
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-slate-900 text-white">
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
