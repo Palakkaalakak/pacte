@@ -67,21 +67,39 @@ def _inventory_preview_lines(inventory: Inventory) -> list[str]:
     return [f"{entry.name} x{entry.qty}" for entry in inventory.items]
 
 
+VALUE_BASIS_LABELS = {
+    "gamersberg": "Gamersberg",
+    "fruityblox": "FruityBlox",
+    "bloxfruit": "BloxFruit Values",
+    "bloxfruitsvalues": "bloxfruitsvalues.com",
+}
+
+
 def _goals_preview_lines(goals: Goals) -> list[str]:
     if goals.any:
-        return ["Show every trade you can physically make — no filters applied."]
+        lines = ["Show every trade you can physically make — no filters applied."]
+        lines.append(f"Value source: {VALUE_BASIS_LABELS.get(goals.value_basis, goals.value_basis)}")
+        lines.append(f"Showing up to {goals.limit} result(s)")
+        return lines
     lines = []
+    if goals.value_basis != "gamersberg":
+        lines.append(f"Value source: {VALUE_BASIS_LABELS.get(goals.value_basis, goals.value_basis)}")
     if goals.min_profit:
         lines.append(f"Minimum profit: {format_value(goals.min_profit)}")
     if goals.min_profit_pct:
         lines.append(f"Minimum profit: +{goals.min_profit_pct:.0%}")
+    if goals.min_get_value:
+        lines.append(f"Minimum value received: {format_value(goals.min_get_value)}")
+    if goals.max_give_value:
+        lines.append(f"Maximum value given up: {format_value(goals.max_give_value)}")
     if goals.any_fair:
         lines.append("Also include break-even trades (no loss, no big gain)")
     if goals.min_demand:
         lines.append(f"Minimum demand of what you'd receive: {goals.min_demand}/10")
     if goals.want_item:
         names = goals.want_item if isinstance(goals.want_item, list) else [goals.want_item]
-        lines.append(f"Only trades giving: {', '.join(names)}")
+        suffix = "" if goals.want_item_include_permanent else " (exact name only, not Permanent variants)"
+        lines.append(f"Only trades giving: {', '.join(names)}{suffix}")
     if goals.min_confidence:
         lines.append(f"Minimum trust score: {goals.min_confidence}%")
     if goals.max_age_hours:
@@ -90,8 +108,9 @@ def _goals_preview_lines(goals: Goals) -> list[str]:
         lines.append(f"Don't suggest owning more than {goals.max_qty_per_fruit} of any one fruit")
     if goals.exclude_lose_wfl:
         lines.append("Skip trades the community mostly voted a loss")
-    if not lines:
-        lines.append("No extra filters — just needs to be a trade you can physically make.")
+    lines.append(f"Showing up to {goals.limit} result(s)")
+    if len(lines) == 1:
+        lines.insert(0, "No extra filters — just needs to be a trade you can physically make.")
     return lines
 
 
@@ -137,18 +156,79 @@ if goals_mode == "Use a saved setup":
             st.write(f"- {line}")
 else:
     show_any = st.checkbox("Just show me anything I can trade for (skip the filters below)", value=False)
-    min_profit_millions = st.slider("Minimum profit (in millions of value)", 0, 200, 0, step=5)
-    any_fair = st.checkbox("Also include break-even trades (no loss, no big gain)", value=True)
-    min_demand = st.slider("Minimum demand of what you'd receive (0 = don't care, 10 = very tradeable)", 0, 10, 0)
-    want_names = st.multiselect("Only show trades that give me one of these (optional)", _catalog_names())
+    min_profit_millions = st.slider("Minimum profit (in millions of value)", 0, 200, 0, step=5, disabled=show_any)
+    min_profit_pct = st.slider(
+        "Minimum profit (%)", 0, 200, 0, step=5,
+        help="Trade must be worth at least this much more than what you're giving up.",
+        disabled=show_any,
+    )
+    any_fair = st.checkbox(
+        "Also include break-even trades (no loss, no big gain)", value=True, disabled=show_any
+    )
+    min_demand = st.slider(
+        "Minimum demand of what you'd receive (0 = don't care, 10 = very tradeable)", 0, 10, 0,
+        disabled=show_any,
+    )
+    want_names = st.multiselect(
+        "Only show trades that give me one of these (optional)", _catalog_names(), disabled=show_any
+    )
+    want_item_include_permanent = st.checkbox(
+        "Also match the Permanent version of anything I want above", value=True,
+        disabled=show_any or not want_names,
+    )
+
+    with st.expander("Advanced filters"):
+        value_basis_label = st.selectbox(
+            "Value source (which site's numbers to rank trades by)",
+            list(VALUE_BASIS_LABELS.values()),
+            index=0,
+            disabled=show_any,
+        )
+        value_basis = next(k for k, v in VALUE_BASIS_LABELS.items() if v == value_basis_label)
+        min_get_value_millions = st.slider(
+            "Minimum value received (in millions), regardless of profit margin", 0, 500, 0, step=5,
+            disabled=show_any,
+        )
+        max_give_value_millions = st.slider(
+            "Maximum value I'm willing to give up (in millions)", 0, 500, 0, step=5,
+            help="0 = no limit.",
+            disabled=show_any,
+        )
+        exclude_lose_wfl = st.checkbox(
+            "Skip trades the community mostly voted a loss (Gamersberg only)", value=False, disabled=show_any
+        )
+        min_confidence = st.slider(
+            "Minimum trust score (0 = don't care)", 0, 100, 0,
+            help="Blends value-source agreement, listing freshness, community votes, and whether the "
+            "40% Beli-balance rule could even be checked. Raise this to filter out suspicious trades.",
+            disabled=show_any,
+        )
+        max_age_hours = st.slider(
+            "Ignore listings older than this many hours (0 = no limit)", 0, 168, 0,
+            disabled=show_any,
+        )
+        max_qty_per_fruit = st.slider(
+            "Don't suggest owning more than this many of any one fruit (0 = no cap)", 0, 20, 0,
+            disabled=show_any,
+        )
+        limit = st.slider("Max results to show", 10, 1000, 200, step=10)
 
     goals = Goals(
         any=show_any,
+        value_basis=value_basis,
         min_profit=min_profit_millions * 1_000_000 if min_profit_millions > 0 else None,
+        min_profit_pct=min_profit_pct / 100 if min_profit_pct > 0 else None,
+        min_get_value=min_get_value_millions * 1_000_000 if min_get_value_millions > 0 else None,
+        max_give_value=max_give_value_millions * 1_000_000 if max_give_value_millions > 0 else None,
         any_fair=any_fair,
         min_demand=min_demand if min_demand > 0 else None,
         want_item=want_names or None,
-        limit=1000,
+        want_item_include_permanent=want_item_include_permanent,
+        exclude_lose_wfl=exclude_lose_wfl,
+        min_confidence=min_confidence if min_confidence > 0 else None,
+        max_age_hours=max_age_hours if max_age_hours > 0 else None,
+        max_qty_per_fruit=max_qty_per_fruit if max_qty_per_fruit > 0 else None,
+        limit=limit,
     )
     with st.expander("See what these goals look for"):
         for line in _goals_preview_lines(goals):
