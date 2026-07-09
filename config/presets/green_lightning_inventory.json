@@ -1,0 +1,21 @@
+{
+  "items": [
+    { "name": "Green Lightning", "qty": 2 },
+    { "name": "Torment Pain", "qty": 2 },
+    { "name": "Emerald Diamond", "qty": 1 },
+    { "name": "Glacier Eagle", "qty": 3 },
+    { "name": "Topaz Diamond", "qty": 1 },
+    { "name": "Rose Quartz Diamond", "qty": 3 },
+    { "name": "Venom", "qty": 3 },
+    { "name": "Gravity", "qty": 2 },
+    { "name": "Control", "qty": 1 },
+    { "name": "Shadow", "qty": 1 },
+    { "name": "Mammoth", "qty": 1 },
+    { "name": "Dough", "qty": 2 },
+    { "name": "Sound", "qty": 2 },
+    { "name": "Phoenix", "qty": 3 },
+    { "name": "Portal", "qty": 3 },
+    { "name": "Spider", "qty": 3 },
+    { "name": "Pain", "qty": 1 }
+  ]
+}

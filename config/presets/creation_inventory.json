@@ -1,0 +1,20 @@
+{
+  "items": [
+    { "name": "Kitsune", "qty": 1 },
+    { "name": "Torment Pain", "qty": 1 },
+    { "name": "Spider", "qty": 1 },
+    { "name": "Creation", "qty": 1 },
+    { "name": "Quake", "qty": 1 },
+    { "name": "Light", "qty": 1 },
+    { "name": "Rubber", "qty": 1 },
+    { "name": "Magma", "qty": 1 },
+    { "name": "Sand", "qty": 1 },
+    { "name": "Flame", "qty": 1 },
+    { "name": "Eagle", "qty": 1 },
+    { "name": "Diamond", "qty": 1 },
+    { "name": "Dark", "qty": 1 },
+    { "name": "Smoke", "qty": 1 },
+    { "name": "Spring", "qty": 1 },
+    { "name": "Spike", "qty": 1 }
+  ]
+}
