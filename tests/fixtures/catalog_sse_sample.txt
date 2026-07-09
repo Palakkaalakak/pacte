@@ -1,0 +1,7 @@
+data: {"id":57,"trades":0,"image":"https://asset.gamersberg.com/Blox-Fruits/physical/mythical/Kitsune.webp","name":"Kitsune","tags":["Physical"],"version":5,"price":8000000,"robuxprice":4000,"rarity":"Mythical","type":"Zoan","gamersbergvalue":680000000,"fruitybloxvalue":165000000,"bloxfruitvalue":490000000,"demand":10,"indicator":"stable"}
+
+data: {"id":92,"trades":0,"image":"https://asset.gamersberg.com/Blox-Fruits/physical/mythical/Yeti.webp","name":"Yeti","tags":["Physical"],"version":3,"price":5000000,"robuxprice":3000,"rarity":"Mythical","type":"Zoan","gamersbergvalue":5000000,"fruitybloxvalue":0,"bloxfruitvalue":4800000,"demand":6,"indicator":"Stable"}
+
+data: {"id":71,"trades":0,"image":"https://asset.gamersberg.com/Blox-Fruits/physical/mythical/Shadow.webp","name":"Shadow","tags":["Physical"],"version":3,"price":2900000,"robuxprice":2425,"rarity":"Mythical","type":"Logia","gamersbergvalue":2900000,"fruitybloxvalue":2000000,"bloxfruitvalue":0,"demand":5,"indicator":"dropping"}
+
+data: [END]

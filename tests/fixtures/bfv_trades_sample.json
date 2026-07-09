@@ -1,0 +1,33 @@
+[
+  {
+    "id": "bfv-open-trade",
+    "created_at": "2026-07-01T00:00:00.000Z",
+    "expires_at": "2099-01-01T00:00:00.000Z",
+    "status": "active",
+    "user_username": "trader1",
+    "offered_items": [
+      { "name": "Kitsune", "count": 1, "itemId": "57", "image": "img", "metadata": { "regValue": 680000000, "regDemand": 10, "regTrend": "stable", "rarity": "Mythical", "type": "Fruit", "category": "Fruits" } }
+    ],
+    "requested_items": [
+      { "name": "Yeti", "count": 2, "itemId": "92", "image": "img", "metadata": { "regValue": 5000000, "regDemand": 6, "regTrend": "stable", "rarity": "Mythical", "type": "Fruit", "category": "Fruits" } }
+    ]
+  },
+  {
+    "id": "bfv-inactive-skip",
+    "created_at": "2026-07-01T00:00:00.000Z",
+    "expires_at": "2099-01-01T00:00:00.000Z",
+    "status": "completed",
+    "user_username": "trader2",
+    "offered_items": [{ "name": "Kitsune", "count": 1, "itemId": "57", "metadata": { "regValue": 680000000 } }],
+    "requested_items": [{ "name": "Yeti", "count": 1, "itemId": "92", "metadata": { "regValue": 5000000 } }]
+  },
+  {
+    "id": "bfv-expired-skip",
+    "created_at": "2020-01-01T00:00:00.000Z",
+    "expires_at": "2020-01-08T00:00:00.000Z",
+    "status": "active",
+    "user_username": "trader3",
+    "offered_items": [{ "name": "Kitsune", "count": 1, "itemId": "57", "metadata": { "regValue": 680000000 } }],
+    "requested_items": [{ "name": "Yeti", "count": 1, "itemId": "92", "metadata": { "regValue": 5000000 } }]
+  }
+]

@@ -1,0 +1,27 @@
+{
+  "_comment": [
+    "HOW TO FILL THIS OUT:",
+    "- Copy this file to config/inventory.json and edit that copy (inventory.json is gitignored, so your real inventory never gets committed).",
+    "- Each object in 'items' is one item/fruit you currently own.",
+    "- 'name' must match the catalog's exact name (case-insensitive). See every valid name + its value with: python -m blox_trade_finder --list-catalog",
+    "- 'qty' is optional, defaults to 1. Set it to how many copies you own (e.g. 3 Kitsunes) so the tool can match that many separate trades.",
+    "- 'variant' is optional. Set it to \"Permanent\" if you own the Permanent version of a fruit",
+    "  (e.g. { \"name\": \"Portal\", \"variant\": \"Permanent\" } is treated the same as writing",
+    "  { \"name\": \"Permanent Portal\" } directly — Gamersberg's catalog tracks these as two",
+    "  separate items with different values). Leave it out (or set to \"Physical\") for the normal version.",
+    "  Note: bloxfruitsvalues.com's own data doesn't distinguish Permanent from Physical at all, so this",
+    "  only affects matching against Gamersberg-sourced trades.",
+    "- This '_comment' key (and any other key starting with '_') is ignored by the tool — safe to leave in or delete."
+  ],
+  "items": [
+    { "name": "Rose Quartz Diamond", "qty": 3 },
+    { "name": "Topaz Diamond", "qty": 1 },
+    { "name": "Emerald Diamond", "qty": 1 },
+    { "name": "Green Lightning", "qty": 2 },
+    { "name": "Torment Pain", "qty": 3 },
+    { "name": "Glacier Eagle", "qty": 3 },
+    { "name": "Dough", "qty": 1 },
+    { "name": "Venom", "qty": 3 },
+    { "name": "Portal", "qty": 3 }
+  ]
+}

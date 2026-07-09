@@ -1,0 +1,13 @@
+{
+  "_comment": [
+    "SIMULATION FILE — not your real inventory.",
+    "Contains exactly what's needed to match a specific real, live trade we picked manually",
+    "from the Gamersberg feed on 2026-07-03: trade id 07f02277-bba8-4bce-b02e-daee6e48b5ce,",
+    "https://www.gamersberg.com/blox-fruits/trading/07f02277-bba8-4bce-b02e-daee6e48b5ce",
+    "That poster wants only 'Control' and gives Tiger + Or + Yeti in return.",
+    "This file owns exactly 1 Control so the system MUST find that trade if matching works."
+  ],
+  "items": [
+    { "name": "Control", "qty": 1 }
+  ]
+}

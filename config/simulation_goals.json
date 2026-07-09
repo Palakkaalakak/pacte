@@ -1,0 +1,10 @@
+{
+  "_comment": [
+    "SIMULATION FILE — permissive goals so the known target trade can't be filtered out.",
+    "The picked trade nets +130,000,000 gamersberg value (+72%), well above min_profit here."
+  ],
+  "value_basis": "gamersberg",
+  "min_profit": 50000000,
+  "any_fair": true,
+  "limit": 25
+}

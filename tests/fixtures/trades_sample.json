@@ -1,0 +1,58 @@
+[
+  {
+    "id": "trade-open-fair",
+    "sender": { "name": "aerbo", "averageRating": 4.2 },
+    "sentItems": [92],
+    "receivedItems": [71],
+    "completed": false,
+    "createdAt": "2026-07-01T00:00:00.000Z",
+    "expiresAt": "2099-01-01T00:00:00.000Z",
+    "wRating": 3,
+    "fRating": 1,
+    "lRating": 0,
+    "game": "blox-fruits",
+    "metaData": { "sent": [null], "received": [null] }
+  },
+  {
+    "id": "trade-completed-skip",
+    "sender": { "name": "someone", "averageRating": 3.0 },
+    "sentItems": [57],
+    "receivedItems": [92],
+    "completed": true,
+    "createdAt": "2026-06-01T00:00:00.000Z",
+    "expiresAt": "2099-01-01T00:00:00.000Z",
+    "wRating": 0,
+    "fRating": 0,
+    "lRating": 0,
+    "game": "blox-fruits",
+    "metaData": { "sent": [null], "received": [null] }
+  },
+  {
+    "id": "trade-expired-skip",
+    "sender": { "name": "someone-else", "averageRating": 1.0 },
+    "sentItems": [57],
+    "receivedItems": [92],
+    "completed": false,
+    "createdAt": "2020-01-01T00:00:00.000Z",
+    "expiresAt": "2020-01-08T00:00:00.000Z",
+    "wRating": 0,
+    "fRating": 0,
+    "lRating": 0,
+    "game": "blox-fruits",
+    "metaData": { "sent": [null], "received": [null] }
+  },
+  {
+    "id": "trade-unknown-item-skip",
+    "sender": { "name": "ghost", "averageRating": 0 },
+    "sentItems": [999999],
+    "receivedItems": [71],
+    "completed": false,
+    "createdAt": "2026-07-01T00:00:00.000Z",
+    "expiresAt": "2099-01-01T00:00:00.000Z",
+    "wRating": 0,
+    "fRating": 0,
+    "lRating": 0,
+    "game": "blox-fruits",
+    "metaData": { "sent": [null], "received": [null] }
+  }
+]

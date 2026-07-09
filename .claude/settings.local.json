@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "mcp__plugin_context-mode_context-mode__ctx_execute",
+      "Bash(npm --version)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(\".venv/Scripts/python.exe\" -m pytest -q)",
+      "Bash(rtk grep *)",
+      "Bash(rm -rf output)",
+      "Bash(\".venv/Scripts/python.exe\" -m blox_trade_finder --inventory config/inventory.json --any-fair --want Yeti --want Control)",
+      "Bash(PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -c ' *)",
+      "Bash(rtk git *)",
+      "Bash(gh auth *)"
+    ]
+  }
+}
