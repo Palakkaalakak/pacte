@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
 import httpx
@@ -24,6 +26,10 @@ GAME_TYPE = "bloxfruits"
 PAGE_SIZE = 50
 MAX_PAGES_PER_ITEM = 3
 TTL_SECONDS = 2 * 60
+# Items fetched concurrently; the shared RateLimiter still paces actual HTTP
+# requests to ~1/sec, so this just removes idle thread-switch overhead rather
+# than hammering the host harder.
+MAX_WORKERS = 5
 
 
 def _slugify(name: str) -> str:
@@ -60,10 +66,9 @@ class BloxFruitsValuesSource(TradeSource):
         logger.info(
             "bloxfruitsvalues: querying %d inventory item(s): %s", len(item_names), item_names
         )
-        by_id: dict[str, dict] = {}
-        for name in item_names:
+        def _fetch_one(name: str) -> list[dict] | None:
             try:
-                trades = get_or_fetch(
+                return get_or_fetch(
                     f"bfv_trades_{_slugify(name)}",
                     self.ttl_seconds,
                     lambda n=name: self._fetch_for_name(n),
@@ -80,19 +85,25 @@ class BloxFruitsValuesSource(TradeSource):
                     "continuing with the rest of your inventory",
                     name, exc,
                 )
+                return None
+
+        by_id: dict[str, dict] = {}
+        by_id_lock = threading.Lock()
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(_fetch_one, name): name for name in item_names}
+            for future in as_completed(futures):
+                name = futures[future]
+                trades = future.result() or []
+                with by_id_lock:
+                    new_count = sum(1 for t in trades if t["id"] not in by_id)
+                    for t in trades:
+                        by_id[t["id"]] = t
+                logger.info(
+                    "bloxfruitsvalues: '%s' -> %d trade ad(s) wanting it (%d new, %d already seen)",
+                    name, len(trades), new_count, len(trades) - new_count,
+                )
                 if on_item_done is not None:
                     on_item_done(name)
-                continue
-
-            new_count = sum(1 for t in trades if t["id"] not in by_id)
-            for t in trades:
-                by_id[t["id"]] = t
-            logger.info(
-                "bloxfruitsvalues: '%s' -> %d trade ad(s) wanting it (%d new, %d already seen)",
-                name, len(trades), new_count, len(trades) - new_count,
-            )
-            if on_item_done is not None:
-                on_item_done(name)
         logger.info("bloxfruitsvalues: %d unique trade ads collected total", len(by_id))
         return list(by_id.values())
 

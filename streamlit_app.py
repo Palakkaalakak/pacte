@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -44,6 +45,22 @@ def _catalog_names() -> list[str]:
     finally:
         source.close()
     return sorted(item.name for item in catalog.items)
+
+
+def _posted_ago(when: datetime) -> str:
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    seconds = max(0, (datetime.now(timezone.utc) - when).total_seconds())
+    if seconds < 60:
+        return "just now"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{minutes:.0f}m ago"
+    hours = minutes / 60
+    if hours < 24:
+        return f"{hours:.0f}h ago"
+    days = hours / 24
+    return f"{days:.0f}d ago"
 
 
 def _inventory_preview_lines(inventory: Inventory) -> list[str]:
@@ -196,7 +213,7 @@ if find_clicked:
                 "Demand": m.demand,
                 "Verdict": m.verdict.upper(),
                 "Confidence": f"{m.confidence}%",
-                "Poster": m.listing.poster_name,
+                "Posted": _posted_ago(m.listing.created_at),
                 "Link": m.listing.url,
             })
         df = pd.DataFrame(rows)
