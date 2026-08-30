@@ -269,6 +269,20 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "it": "Confronto scambi con i tuoi obiettivi...",
     },
     "progress_done": {"en": "Done!", "it": "Fatto!"},
+    "scan_failed": {
+        "en": "Scan failed: {error}",
+        "it": "Scansione fallita: {error}",
+    },
+    "scan_failed_details": {
+        "en": "Technical details",
+        "it": "Dettagli tecnici",
+    },
+    "catalog_failed": {
+        "en": "Could not fetch the item catalog from Gamersberg: {error}. "
+              "The site may be down or blocking this server — try again in a minute.",
+        "it": "Impossibile recuperare il catalogo oggetti da Gamersberg: {error}. "
+              "Il sito potrebbe essere giù o bloccare questo server — riprova tra un minuto.",
+    },
     "found_matches": {
         "en": "Found {count} matching trade(s).",
         "it": "Trovati {count} scambi corrispondenti.",
@@ -391,13 +405,25 @@ def _save_user_inventory(name: str, inventory: Inventory) -> None:
 
 
 @st.cache_resource(show_spinner=False)
-def _catalog_names() -> list[str]:
+def _catalog_names_cached() -> list[str]:
     source = GamersbergSource()
     try:
         catalog = source.fetch_catalog(fresh=False)
     finally:
         source.close()
     return sorted(item.name for item in catalog.items)
+
+
+def _catalog_names() -> list[str]:
+    """Catalog names with a visible error instead of a silent blank page when
+    Gamersberg is unreachable (seen on hosted runtimes like Streamlit Cloud)."""
+    try:
+        with st.spinner(t("progress_catalog")):
+            return _catalog_names_cached()
+    except Exception as exc:
+        st.error(t("catalog_failed", error=f"{type(exc).__name__}: {exc}"))
+        st.stop()
+        raise  # unreachable — st.stop() halts the script; keeps type checkers happy
 
 
 def _posted_ago(when: datetime) -> str:
@@ -641,6 +667,12 @@ selected_sources = SOURCE_CHOICES[source_label]
 # ------------------------------------------------------------------- action
 find_clicked = st.button(t("find_trades"), type="primary", use_container_width=True)
 
+# Interactive scans page the Gamersberg feed at ~1 request/second. Cap the
+# page count so a first-ever scan on a fresh server (e.g. Streamlit Cloud,
+# where nothing is cached yet) finishes in ~2 minutes instead of grinding
+# through the full 400-page deep-scan budget the 24/7 watcher uses.
+INTERACTIVE_GB_MAX_PAGES = 120
+
 if find_clicked:
     if not inventory.items:
         st.warning(t("need_item_warning"))
@@ -648,12 +680,25 @@ if find_clicked:
 
     progress = st.progress(0, text=t("progress_start"))
 
+    # Progress callbacks fire from run_scan's worker threads. Streamlit
+    # ignores UI calls from threads without a ScriptRunContext (this is why
+    # the bar used to freeze at "Fetching item catalog" on Streamlit Cloud) —
+    # so capture the context here and attach it to whichever thread calls.
+    try:
+        from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+        _script_ctx = get_script_run_ctx()
+    except Exception:  # API moved between Streamlit versions — degrade quietly
+        add_script_run_ctx = None  # type: ignore[assignment]
+        _script_ctx = None
+
     def _safe_progress(pct: int, text: str) -> None:
-        # Progress callbacks may fire from worker threads; Streamlit calls
-        # from a non-script thread raise — swallow rather than kill the scan.
         try:
+            if _script_ctx is not None and add_script_run_ctx is not None:
+                import threading
+                add_script_run_ctx(threading.current_thread(), _script_ctx)
             progress.progress(min(max(pct, 0), 100), text=text)
         except Exception:
+            # Never let a UI hiccup kill the scan itself.
             pass
 
     def _on_phase(phase: str) -> None:
@@ -669,17 +714,26 @@ if find_clicked:
     def _on_gb_page(page: int, new: int) -> None:
         _safe_progress(min(15 + page // 6, 85), t("progress_gb_deep", page=page, new=new))
 
-    result = run_scan(
-        inventory,
-        goals,
-        sources=selected_sources,
-        deep=True,
-        progress=ScanProgress(
-            on_phase=_on_phase,
-            on_bfv_item_done=_on_bfv_item,
-            on_gb_page_done=_on_gb_page,
-        ),
-    )
+    try:
+        result = run_scan(
+            inventory,
+            goals,
+            sources=selected_sources,
+            deep=True,
+            gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
+            progress=ScanProgress(
+                on_phase=_on_phase,
+                on_bfv_item_done=_on_bfv_item,
+                on_gb_page_done=_on_gb_page,
+            ),
+        )
+    except Exception as exc:  # surface it — never leave the user staring at a frozen bar
+        progress.empty()
+        st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
+        import traceback
+        with st.expander(t("scan_failed_details")):
+            st.code(traceback.format_exc())
+        st.stop()
     progress.progress(100, text=t("progress_done"))
     progress.empty()
 

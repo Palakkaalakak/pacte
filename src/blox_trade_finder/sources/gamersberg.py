@@ -151,6 +151,7 @@ class GamersbergSource(ValueSource, TradeSource):
         deep: bool = False,
         store: TradeStore | None = None,
         on_page_done: Callable[[int, int], None] | None = None,
+        max_pages: int | None = None,
     ) -> list[dict]:
         # We always fetch the full feed rather than filtering per item (unlike
         # bloxfruitsvalues.com); item_names is accepted for interface
@@ -161,13 +162,17 @@ class GamersbergSource(ValueSource, TradeSource):
             # default-path store — real bug caught by tests.
             if store is None:
                 store = TradeStore()
-            return self._fetch_deep(store, on_page_done=on_page_done)
+            return self._fetch_deep(store, on_page_done=on_page_done, max_pages=max_pages)
         return get_or_fetch(
             "gamersberg_trades", self.ttl_seconds_trades, self._fetch_all_trade_pages, fresh=fresh
         )
 
     def _fetch_deep(
-        self, store: TradeStore, *, on_page_done: Callable[[int, int], None] | None = None
+        self,
+        store: TradeStore,
+        *,
+        on_page_done: Callable[[int, int], None] | None = None,
+        max_pages: int | None = None,
     ) -> list[dict]:
         """Incremental deep scan: page the (newest-first) feed, stop after
         KNOWN_PAGE_STREAK_TO_STOP consecutive pages of already-stored trades,
@@ -176,10 +181,11 @@ class GamersbergSource(ValueSource, TradeSource):
         if removed:
             logger.debug("gamersberg deep: pruned %d expired trade(s) from store", removed)
         known = store.known_ids()
+        page_cap = max_pages if max_pages is not None else DEEP_MAX_TRADE_PAGES
         fetched: dict[str, dict] = {}
         known_page_streak = 0
         page = 1
-        while page <= DEEP_MAX_TRADE_PAGES:
+        while page <= page_cap:
             resp = request_with_retry(
                 self._client, "GET", f"/api/v1/trade/list/all/{GAME}", params={"page": page},
                 rate_limiter=self._rate_limiter,
@@ -219,7 +225,7 @@ class GamersbergSource(ValueSource, TradeSource):
             page += 1
         else:
             logger.warning(
-                "gamersberg deep: hit %d-page cap — feed may extend further", DEEP_MAX_TRADE_PAGES
+                "gamersberg deep: hit %d-page cap — feed may extend further", page_cap
             )
 
         new = store.merge(list(fetched.values()))
@@ -227,7 +233,7 @@ class GamersbergSource(ValueSource, TradeSource):
         logger.info(
             "gamersberg deep: fetched %d trade(s) across %d page(s), %d new to store, "
             "%d active total",
-            len(fetched), min(page, DEEP_MAX_TRADE_PAGES), new, len(active),
+            len(fetched), min(page, page_cap), new, len(active),
         )
         return active
 

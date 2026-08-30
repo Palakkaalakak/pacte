@@ -130,3 +130,54 @@ def test_repo_settings_json_is_valid():
     assert config.email.to_addrs == ["topical_codices_0g@icloud.com"]
     assert "Tiger" in config.alert_items
     assert len(config.rules) == 2
+
+
+def test_trailing_commas_tolerated(in_tmp):
+    """Hand edits on the GitHub web UI often leave trailing commas — the
+    parser must shrug them off instead of crashing the cloud watcher."""
+    path = in_tmp / "SETTINGS.json"
+    path.write_text(
+        '// comment\n'
+        '{\n'
+        '  "i_own": {"Kitsune": 1, "Spin": 1,},\n'
+        '  "hunted_fruits": ["Tiger",],\n'
+        '  "alerts": [\n'
+        '    {"name": "A", "email_every_minutes": 60,},\n'
+        '  ],\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    config = load_settings(path)
+    assert config.alert_items == ["Tiger"]
+    assert len(config.rules) == 1
+
+
+def test_instant_flag_forces_frequency_zero(in_tmp):
+    path = in_tmp / "SETTINGS.json"
+    path.write_text(json.dumps({
+        "i_own": {"Kitsune": 1},
+        "alerts": [
+            {"name": "Batched", "email_every_minutes": 30},
+            {"name": "Now", "instant": True, "email_every_minutes": 30},
+            {"name": "NowToo", "instant": True},
+        ],
+    }), encoding="utf-8")
+    config = load_settings(path)
+    freq = {r.name: r.frequency_minutes for r in config.rules}
+    assert freq == {"Batched": 30, "Now": 0, "NowToo": 0}
+
+
+def test_repo_settings_buddha_alert_is_instant():
+    """The shipped SETTINGS.json marks 'Someone wants my Buddha' as instant."""
+    repo_settings = Path(__file__).parent.parent / "SETTINGS.json"
+    cwd = os.getcwd()
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        os.chdir(td)
+        try:
+            config = load_settings(repo_settings)
+        finally:
+            os.chdir(cwd)
+    freq = {r.name: r.frequency_minutes for r in config.rules}
+    assert freq["Someone wants my Buddha"] == 0
+    assert freq["Big profit"] == 60

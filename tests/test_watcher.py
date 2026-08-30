@@ -179,3 +179,52 @@ def test_load_config_empty_password_no_env_raises(tmp_path: Path, monkeypatch: p
     }), encoding="utf-8")
     with pytest.raises(ValueError, match="WATCHER_SMTP_PASSWORD"):
         load_config(path)
+
+
+class TestAlreadySentDedupe:
+    """_already_sent: persisted duplicate-email guard."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate_log(self, tmp_path, monkeypatch):
+        import blox_trade_finder.watcher as w
+        monkeypatch.setattr(w, "SENT_LOG_PATH", tmp_path / "sent_log.json")
+
+    def test_first_send_allowed_second_suppressed(self) -> None:
+        from blox_trade_finder.watcher import _already_sent
+        matches = [_match("t1", ["Dragon"]), _match("t2", ["Kitsune"])]
+        assert _already_sent("[Big profit] 2 matching trade(s)", matches) is False
+        assert _already_sent("[Big profit] 2 matching trade(s)", matches) is True
+
+    def test_different_subject_not_suppressed(self) -> None:
+        from blox_trade_finder.watcher import _already_sent
+        matches = [_match("t1", ["Dragon"])]
+        assert _already_sent("subject A", matches) is False
+        assert _already_sent("subject B", matches) is False
+
+    def test_different_trades_not_suppressed(self) -> None:
+        from blox_trade_finder.watcher import _already_sent
+        assert _already_sent("s", [_match("t1", ["Dragon"])]) is False
+        assert _already_sent("s", [_match("t2", ["Dragon"])]) is False
+
+    def test_trade_order_does_not_matter(self) -> None:
+        from blox_trade_finder.watcher import _already_sent
+        a, b = _match("t1", ["Dragon"]), _match("t2", ["Kitsune"])
+        assert _already_sent("s", [a, b]) is False
+        assert _already_sent("s", [b, a]) is True
+
+    def test_expired_entries_allow_resend(self, monkeypatch) -> None:
+        import blox_trade_finder.watcher as w
+        from datetime import timedelta
+        matches = [_match("t1", ["Dragon"])]
+        assert w._already_sent("s", matches) is False
+        # Age the recorded entry past the dedupe window.
+        log = json.loads(w.SENT_LOG_PATH.read_text())
+        old = datetime.now(timezone.utc) - timedelta(hours=w.SENT_DEDUPE_HOURS + 1)
+        log = {k: old.isoformat() for k in log}
+        w.SENT_LOG_PATH.write_text(json.dumps(log))
+        assert w._already_sent("s", matches) is False
+
+    def test_corrupt_log_recovers(self) -> None:
+        import blox_trade_finder.watcher as w
+        w.SENT_LOG_PATH.write_text("{corrupt")
+        assert w._already_sent("s", [_match("t1", ["Dragon"])]) is False

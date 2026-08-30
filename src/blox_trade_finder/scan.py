@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from typing import Callable
 
@@ -26,6 +27,12 @@ from blox_trade_finder.store import TradeStore
 logger = logging.getLogger(__name__)
 
 VALID_SOURCES = ("gamersberg", "bloxfruitsvalues")
+
+# Hard ceiling on how long we wait for either source's fetch thread. Every
+# individual HTTP request already has its own timeout + bounded retries, but a
+# stuck thread (pathological network on a hosted runtime, e.g. Streamlit
+# Cloud) must never hang callers forever.
+SOURCE_FETCH_TIMEOUT_SECONDS = 15 * 60
 
 
 @dataclass
@@ -60,6 +67,7 @@ def run_scan(
     fresh: bool = False,
     store: TradeStore | None = None,
     progress: ScanProgress | None = None,
+    gb_max_pages: int | None = None,
 ) -> ScanResult:
     """Fetch, normalize and match. `sources` defaults to all of VALID_SOURCES."""
     if sources is None:
@@ -85,6 +93,7 @@ def run_scan(
                     deep=True,
                     store=gb_store,
                     on_page_done=progress.on_gb_page_done if progress else None,
+                    max_pages=gb_max_pages,
                 )
             return gamersberg.fetch_listings_raw(fresh=fresh)
 
@@ -104,7 +113,11 @@ def run_scan(
         # The two hosts are unrelated (each source has its own rate limiter),
         # so fetch them concurrently; the (fast, usually cached) Gamersberg
         # catalog fetch happens on the main thread meanwhile.
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        # NOT a `with` block: exiting the context manager joins worker threads,
+        # so a stuck fetch would hang there even after our timeout fired.
+        # shutdown(wait=False) lets us abandon a wedged thread instead.
+        executor = ThreadPoolExecutor(max_workers=2)
+        try:
             f_gb = executor.submit(_fetch_gb)
             f_bfv = executor.submit(_fetch_bfv)
 
@@ -114,8 +127,19 @@ def run_scan(
             catalog = gamersberg.fetch_catalog(fresh=fresh)
             name_warnings = check_inventory_names(inventory, catalog)
 
-            gamersberg_raw = f_gb.result()
-            bfv_raw = f_bfv.result()
+            try:
+                gamersberg_raw = f_gb.result(timeout=SOURCE_FETCH_TIMEOUT_SECONDS)
+                bfv_raw = f_bfv.result(timeout=SOURCE_FETCH_TIMEOUT_SECONDS)
+            except FutureTimeoutError:
+                f_gb.cancel()
+                f_bfv.cancel()
+                raise TimeoutError(
+                    "Source fetch did not finish within "
+                    f"{SOURCE_FETCH_TIMEOUT_SECONDS // 60} minutes — the trading "
+                    "sites may be blocking this server or very slow right now."
+                ) from None
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         _phase(progress, "matching")
         listings = build_listings(gamersberg_raw, catalog) + build_listings_bfv(bfv_raw, catalog)
