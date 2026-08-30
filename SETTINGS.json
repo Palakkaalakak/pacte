@@ -1,0 +1,93 @@
+// ============================================================================
+//  BLOX FRUITS TRADE WATCHER — YOUR SETTINGS (this is the ONLY file to edit)
+// ============================================================================
+//
+//  HOW TO EDIT (on your phone or PC, takes 30 seconds):
+//    1. On github.com open this file and tap the pencil icon (Edit).
+//    2. Change what you want below. Lines starting with // are ignored.
+//    3. Tap "Commit changes". Done — the next scan (within ~10 min) uses it.
+//
+//  WHAT EACH SETTING DOES:
+//    send_alerts_to        Your email. Alerts + digests go here.
+//    i_own                 Your fruits: "Name": how many. This is what the
+//                          scanner can offer in trades. Spelling must match
+//                          the game, e.g. "Tiger", "Kitsune", "Dragon",
+//                          "Buddha", "Permanent Portal".
+//    hunted_fruits         Fruits you WANT. The instant you can get one in a
+//                          fair-or-better trade, you get an email. ("Tiger"
+//                          also matches "Permanent Tiger" automatically.)
+//    min_profit_millions   Ignore trades with less profit than this
+//                          (in millions). 0 = show any fair-or-better trade.
+//    max_of_each_fruit_to_give   Never give more than N copies of the same
+//                          fruit in one trade.
+//    skip_community_voted_lose   true = skip trades the community voted "L".
+//    scan_every_minutes    How often to scan. (On GitHub cloud it's ~10 min
+//                          no matter what — that's GitHub's schedule.)
+//    digest_every_minutes  How often you get the "everything else" summary
+//                          email of new matching trades.
+//    max_trades_per_email  Cap so emails don't get huge.
+//
+//  ALERTS — custom email rules. Each alert = one block in the list.
+//  Delete any line you don't need inside an alert; only "name" is required.
+//    name                    Any label. Shows in the email subject.
+//    email_every_minutes     0 = email INSTANTLY when a trade matches.
+//                            60 = collect matches, email at most once/hour.
+//    trade_gives             Alert only if the trade GIVES you one of these.
+//    trade_wants             Alert only if the trade ASKS FOR one of these
+//                            (useful: "someone wants my Buddha").
+//    min_profit_millions     Only trades with at least this much profit.
+//    min_profit_percent      Only trades with at least this % profit (10 = +10%).
+//    min_value_received_millions   Only trades giving you at least this value.
+//    max_value_given_millions      Only trades costing you at most this value.
+//    only_win_trades         true = only community-calculator "W" trades.
+//    min_confidence          0-100. How sure the price data is. 70 = solid.
+//    min_demand              0-10. How wanted the fruits are.
+//    enabled                 false = pause this alert without deleting it.
+//
+// ============================================================================
+{
+  "send_alerts_to": "topical_codices_0g@icloud.com",
+
+  "i_own": {
+    "Torment Pain": 1,
+    "Spider": 1,
+    "Creation": 1,
+    "Quake": 1,
+    "Light": 1,
+    "Rubber": 1,
+    "Magma": 1,
+    "Sand": 1,
+    "Flame": 1,
+    "Eagle": 1,
+    "Diamond": 1,
+    "Dark": 1,
+    "Smoke": 1,
+    "Spring": 1,
+    "Spike": 1
+  },
+
+  "hunted_fruits": ["Kitsune", "Tiger"],
+
+  "min_profit_millions": 0,
+  "max_of_each_fruit_to_give": 1,
+  "skip_community_voted_lose": false,
+
+  "scan_every_minutes": 10,
+  "digest_every_minutes": 30,
+  "max_trades_per_email": 40,
+
+  "alerts": [
+    {
+      "name": "Big profit",
+      "email_every_minutes": 60,
+      "min_profit_millions": 50,
+      "min_confidence": 70
+    },
+    {
+      "name": "Someone wants my Buddha",
+      "email_every_minutes": 30,
+      "trade_wants": ["Buddha"],
+      "min_profit_percent": 10
+    }
+  ]
+}

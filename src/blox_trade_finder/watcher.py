@@ -343,7 +343,15 @@ def main() -> None:
         handlers=[logging.FileHandler(args.log_file, encoding="utf-8"), logging.StreamHandler()],
     )
 
-    config = load_config(args.config)
+    # SETTINGS.json (one friendly file at the repo root) takes priority over
+    # the old multi-file config layout.
+    settings_path = Path("SETTINGS.json")
+    if settings_path.is_file():
+        from blox_trade_finder.settings import load_settings
+        logger.info("using SETTINGS.json (one-file setup)")
+        config = load_settings(settings_path)
+    else:
+        config = load_config(args.config)
     run_watcher(config, max_cycles=1 if args.once else None)
 
 

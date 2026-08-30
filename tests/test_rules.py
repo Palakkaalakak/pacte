@@ -103,7 +103,7 @@ def test_wants_items():
     rule = AlertRule(name="w", wants_items=["Kitsune"])
     assert rule.matches(_match(want=["Kitsune"]))
     assert rule.matches(_match(want=["Permanent Kitsune"]))
-    assert not rule.matches(_match(want=["Leopard"]))
+    assert not rule.matches(_match(want=["Tiger"]))
 
 
 def test_verdict_confidence_demand():

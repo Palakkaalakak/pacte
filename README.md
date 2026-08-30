@@ -7,6 +7,15 @@ for you, based on your inventory and goals.
 Both sites are scanned via their internal (undocumented) backend APIs — not official/public APIs.
 See the plan doc for details and risk notes.
 
+## ⭐ Quick start: edit ONE file — `SETTINGS.json`
+
+Everything you'd normally want to change lives in **[`SETTINGS.json`](SETTINGS.json)** at the
+repo root: your email, your fruits, hunted fruits, and alert rules — with a full tutorial in
+comments at the top of the file. Edit it on github.com (pencil icon → commit) and the cloud
+scanner picks it up on its next run. When `SETTINGS.json` exists, the watcher uses it and
+ignores every other config file. The sections below about `config/*.json` are only for
+advanced/legacy setups.
+
 ## Setup
 
 ```
