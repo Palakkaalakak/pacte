@@ -49,21 +49,27 @@
   "send_alerts_to": "topical_codices_0g@icloud.com",
 
   "i_own": {
-    "Torment Pain": 1,
+    "Shadow": 1,
+    "Spirit": 1,
     "Spider": 1,
+    "Love": 1,
     "Creation": 1,
     "Quake": 1,
     "Light": 1,
     "Rubber": 1,
     "Magma": 1,
+    "Ghost": 1,
     "Sand": 1,
     "Flame": 1,
     "Eagle": 1,
+    "Ice":1,
     "Diamond": 1,
     "Dark": 1,
     "Smoke": 1,
     "Spring": 1,
-    "Spike": 1
+    "Spike": 1,
+    "Rocket":1,
+    "Spin": 1,
   },
 
   "hunted_fruits": ["Kitsune", "Tiger"],
@@ -87,7 +93,7 @@
       "name": "Someone wants my Buddha",
       "email_every_minutes": 30,
       "trade_wants": ["Buddha"],
-      "min_profit_percent": 10
+      "min_profit_percent": 0
     }
   ]
 }
