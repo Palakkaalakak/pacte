@@ -239,6 +239,39 @@ class RuleScheduler:
                 state.mark_sent()
 
 
+SENT_LOG_PATH = CACHE_DIR / "watcher_sent_log.json"
+SENT_DEDUPE_HOURS = 24
+
+
+def _already_sent(subject: str, matches: list[Match]) -> bool:
+    """Duplicate-email guard, persisted to disk: True if an email with the
+    exact same subject + trade set went out within SENT_DEDUPE_HOURS. Records
+    the send otherwise. Protects against repeat sends across restarts/runs."""
+    import hashlib
+
+    ids = sorted(f"{m.listing.source}:{m.listing.id}" for m in matches)
+    key = hashlib.sha256((subject + "|" + ",".join(ids)).encode()).hexdigest()[:16]
+    now = datetime.now(timezone.utc)
+    log: dict[str, str] = {}
+    if SENT_LOG_PATH.exists():
+        try:
+            with SENT_LOG_PATH.open("r", encoding="utf-8") as f:
+                log = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            log = {}
+    cutoff = now.timestamp() - SENT_DEDUPE_HOURS * 3600
+    log = {k: v for k, v in log.items()
+           if datetime.fromisoformat(v).timestamp() > cutoff}
+    if key in log:
+        logger.info("duplicate email suppressed: %r (%d trades)", subject, len(matches))
+        return True
+    log[key] = now.isoformat()
+    SENT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with SENT_LOG_PATH.open("w", encoding="utf-8") as f:
+        json.dump(log, f)
+    return False
+
+
 def _deliver(config: WatcherConfig, subject: str, matches: list[Match]) -> None:
     matches = matches[: config.max_matches_per_email]
     text = matches_to_text(matches, subject)
@@ -246,6 +279,8 @@ def _deliver(config: WatcherConfig, subject: str, matches: list[Match]) -> None:
         # Dry-run mode: no SMTP configured — print instead of send.
         print(f"\n=== [dry-run, no email config] {subject} ===")
         print(text)
+        return
+    if _already_sent(subject, matches):
         return
     try:
         send_email(config.email, subject, text, matches_to_html(matches, subject))

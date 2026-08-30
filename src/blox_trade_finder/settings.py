@@ -20,8 +20,14 @@ SETTINGS_FILENAME = "SETTINGS.json"
 
 def _strip_comments(text: str) -> str:
     """Remove lines whose first non-space characters are // (full-line
-    comments only, so URLs containing // inside values are safe)."""
-    return "\n".join(line for line in text.splitlines() if not re.match(r"\s*//", line))
+    comments only, so URLs containing // inside values are safe), and
+    forgive trailing commas before } or ] — hand-editing on github.com
+    produces those all the time and they must not break the scanner."""
+    text = "\n".join(line for line in text.splitlines() if not re.match(r"\s*//", line))
+    # Remove trailing commas: a comma followed only by whitespace and a
+    # closing brace/bracket. Safe because "," never precedes }/] in values.
+    text = re.sub(r",(\s*[}\]])", r"\1", text)
+    return text
 
 
 def _rule_from_friendly(raw: dict, index: int) -> AlertRule:
@@ -34,10 +40,16 @@ def _rule_from_friendly(raw: dict, index: int) -> AlertRule:
     if raw.get("only_win_trades"):
         verdicts = ["win"]
 
+    # "instant": true is the friendly way to say "email immediately, don't
+    # batch" — it overrides email_every_minutes.
+    frequency = int(raw.get("email_every_minutes", 0) or 0)
+    if raw.get("instant"):
+        frequency = 0
+
     return AlertRule(
         name=str(raw.get("name") or f"Alert {index + 1}"),
         enabled=bool(raw.get("enabled", True)),
-        frequency_minutes=int(raw.get("email_every_minutes", 0) or 0),
+        frequency_minutes=frequency,
         min_profit=millions("min_profit_millions"),
         min_profit_pct=(raw["min_profit_percent"] / 100) if raw.get("min_profit_percent") else None,
         min_get_value=millions("min_value_received_millions"),

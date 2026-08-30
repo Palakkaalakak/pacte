@@ -30,6 +30,8 @@
 //  ALERTS — custom email rules. Each alert = one block in the list.
 //  Delete any line you don't need inside an alert; only "name" is required.
 //    name                    Any label. Shows in the email subject.
+//    instant                 true = email IMMEDIATELY when a trade matches,
+//                            skipping any batching (great for rare trades).
 //    email_every_minutes     0 = email INSTANTLY when a trade matches.
 //                            60 = collect matches, email at most once/hour.
 //    trade_gives             Alert only if the trade GIVES you one of these.
@@ -91,7 +93,7 @@
     },
     {
       "name": "Someone wants my Buddha",
-      "email_every_minutes": 30,
+      "instant": true,
       "trade_wants": ["Buddha"],
       "min_profit_percent": 0
     }
