@@ -7,8 +7,18 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Always import blox_trade_finder from THIS repo's src/, never from a stale
+# pip-installed copy. Streamlit Cloud caches the installed package between
+# deploys, which once shipped an old run_scan() missing new keyword args.
+_SRC = str(Path(__file__).parent / "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+for _mod in [m for m in list(sys.modules) if m.startswith("blox_trade_finder")]:
+    del sys.modules[_mod]  # drop any already-imported stale copies
 
 import pandas as pd
 import streamlit as st

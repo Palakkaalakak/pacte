@@ -11,3 +11,6 @@ config/watcher_inventory.json
 config/watcher_goals.json
 # personal saved inventories
 config/user_inventories/
+
+# Python build artifacts
+*.egg-info/
