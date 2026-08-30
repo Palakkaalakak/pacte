@@ -60,7 +60,7 @@ def load_config(path: Path) -> WatcherConfig:
     # Env-var password override (see ENV_PASSWORD_VAR) so the config file can
     # be committed without any secret in it.
     email = data.get("email")
-    if isinstance(email, dict):
+    if isinstance(email, dict) and email.get("provider") != "formsubmit":
         env_password = os.environ.get(ENV_PASSWORD_VAR)
         if env_password:
             email["password"] = env_password

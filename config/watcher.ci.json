@@ -37,10 +37,7 @@
   "send_empty_digest": false,
   "max_matches_per_email": 40,
   "email": {
-    "smtp_host": "smtp.mail.me.com",
-    "smtp_port": 587,
-    "username": "topical_codices_0g@icloud.com",
-    "password": "",
+    "provider": "formsubmit",
     "to_addrs": [
       "topical_codices_0g@icloud.com"
     ]

@@ -15,10 +15,15 @@ logger = logging.getLogger(__name__)
 
 
 class EmailConfig(BaseModel):
-    smtp_host: str
+    # "smtp"       — classic SMTP (needs username/password)
+    # "formsubmit" — free formsubmit.co relay: no account, no password; the
+    #                recipient just clicks the one-time activation link that
+    #                FormSubmit emails them on first use.
+    provider: str = "smtp"
+    smtp_host: str = ""
     smtp_port: int = 587
-    username: str
-    password: str
+    username: str = ""
+    password: str = ""
     from_addr: str | None = None  # defaults to username
     to_addrs: list[str]
     use_tls: bool = True
@@ -28,7 +33,32 @@ class EmailConfig(BaseModel):
         return self.from_addr or self.username
 
 
+def _send_via_formsubmit(config: EmailConfig, subject: str, text_body: str) -> None:
+    import httpx
+
+    for to_addr in config.to_addrs:
+        resp = httpx.post(
+            f"https://formsubmit.co/ajax/{to_addr}",
+            json={"_subject": subject, "message": text_body},
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                # FormSubmit's AJAX endpoint requires a web-ish origin.
+                "Referer": "https://github.com/Palakkaalakak/pacte",
+                "Origin": "https://github.com",
+            },
+            timeout=30,
+        )
+        data = resp.json()
+        if str(data.get("success")).lower() != "true":
+            raise RuntimeError(f"FormSubmit send to {to_addr} failed: {data}")
+    logger.info("formsubmit: sent %r to %s", subject, config.to_addrs)
+
+
 def send_email(config: EmailConfig, subject: str, text_body: str, html_body: str | None = None) -> None:
+    if config.provider == "formsubmit":
+        _send_via_formsubmit(config, subject, text_body)
+        return
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = config.sender
