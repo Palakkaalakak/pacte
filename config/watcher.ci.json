@@ -37,12 +37,12 @@
   "send_empty_digest": false,
   "max_matches_per_email": 40,
   "email": {
-    "smtp_host": "smtp.gmail.com",
+    "smtp_host": "smtp.mail.me.com",
     "smtp_port": 587,
-    "username": "REPLACE_WITH_YOUR_EMAIL@gmail.com",
+    "username": "topical_codices_0g@icloud.com",
     "password": "",
     "to_addrs": [
-      "REPLACE_WITH_YOUR_EMAIL@gmail.com"
+      "topical_codices_0g@icloud.com"
     ]
   }
 }
