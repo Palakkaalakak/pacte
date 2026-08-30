@@ -1,0 +1,68 @@
+# Free 24/7 cloud scanning via GitHub Actions scheduled runs.
+#
+# Every ~10 minutes GitHub spins up a runner, restores the caches (trade
+# store, seen-tracker, digest queue), runs one scan cycle (--once), sends any
+# instant alerts, sends the digest if 30+ minutes have passed since the last
+# one, and saves the caches back.
+#
+# Setup (one-time):
+#   1. Push this repo to GitHub (private repos get 2,000 free Actions
+#      minutes/month; PUBLIC repos get UNLIMITED free minutes).
+#   2. Commit config/watcher.ci.json (no password inside — see the example).
+#   3. In the repo: Settings -> Secrets and variables -> Actions ->
+#      "New repository secret":
+#        Name:  WATCHER_SMTP_PASSWORD
+#        Value: your Gmail App Password
+#   4. Enable the workflow in the Actions tab (first push usually asks).
+#
+# NOTE: GitHub cron is best-effort — during busy periods runs can start a few
+# minutes late or occasionally be skipped. Fine for trade scanning.
+name: Blox Fruits trade watcher
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # every 10 minutes (best-effort)
+  workflow_dispatch: {}       # allow manual runs from the Actions tab
+
+# Never let two scans overlap (a late run + the next one).
+concurrency:
+  group: watcher
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements.txt -e .
+
+      # Restore .cache/ (trade store + seen tracker + digest queue) from the
+      # previous run. Cache keys are immutable, so we save under a unique key
+      # each run and restore the most recent one via restore-keys.
+      - name: Restore watcher state
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache
+          key: watcher-state-${{ github.run_id }}
+          restore-keys: |
+            watcher-state-
+
+      - name: Run one scan cycle
+        env:
+          WATCHER_SMTP_PASSWORD: ${{ secrets.WATCHER_SMTP_PASSWORD }}
+        run: python -m blox_trade_finder.watcher --config config/watcher.ci.json --once
+
+      - name: Save watcher state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache
+          key: watcher-state-${{ github.run_id }}

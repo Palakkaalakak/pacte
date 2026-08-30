@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Callable
 
 from blox_trade_finder.cache import get_or_fetch, peek
 from blox_trade_finder.http_client import RateLimiter, make_client, request_with_retry
 from blox_trade_finder.models import Catalog, CatalogItem
 from blox_trade_finder.sources.base import TradeSource, ValueSource
+from blox_trade_finder.store import TradeStore
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +21,18 @@ GAME = "blox-fruits"
 # page 30 with no sign of stopping, so this is a coverage/runtime trade-off,
 # not a "the feed definitely ends here" boundary.
 MAX_TRADE_PAGES = 60
+
+# Deep-scan facts, verified live against the real API:
+#   - page size is locked at 12 (limit/pageSize/size/per_page/count are ignored)
+#   - there is NO server-side item filter
+#   - the feed is strictly newest-first by createdAt
+#   - the feed stays valid past page 400
+#   - trades expire 7 days after posting (some deep trades LACK expiresAt)
+# So a deep scan pages from 1 until it hits pages made up entirely of trades
+# already in the persistent TradeStore — after the first full scan, subsequent
+# scans only fetch the new head of the feed.
+DEEP_MAX_TRADE_PAGES = 400
+KNOWN_PAGE_STREAK_TO_STOP = 3
 
 # If the live `version` jumps by more than this since our last cached fetch,
 # the site's data model may have changed underneath us (plan: undocumented
@@ -130,14 +144,92 @@ class GamersbergSource(ValueSource, TradeSource):
         return data.get("version") if data else None
 
     def fetch_listings_raw(
-        self, *, item_names: list[str] | None = None, fresh: bool = False
+        self,
+        *,
+        item_names: list[str] | None = None,
+        fresh: bool = False,
+        deep: bool = False,
+        store: TradeStore | None = None,
+        on_page_done: Callable[[int, int], None] | None = None,
     ) -> list[dict]:
         # We always fetch the full feed rather than filtering per item (unlike
         # bloxfruitsvalues.com); item_names is accepted for interface
         # compatibility but unused.
+        if deep:
+            # NOT `store or TradeStore()`: TradeStore defines __len__, so an
+            # empty store is falsy and would silently be swapped for the shared
+            # default-path store — real bug caught by tests.
+            if store is None:
+                store = TradeStore()
+            return self._fetch_deep(store, on_page_done=on_page_done)
         return get_or_fetch(
             "gamersberg_trades", self.ttl_seconds_trades, self._fetch_all_trade_pages, fresh=fresh
         )
+
+    def _fetch_deep(
+        self, store: TradeStore, *, on_page_done: Callable[[int, int], None] | None = None
+    ) -> list[dict]:
+        """Incremental deep scan: page the (newest-first) feed, stop after
+        KNOWN_PAGE_STREAK_TO_STOP consecutive pages of already-stored trades,
+        merge into the store, and return every active (non-expired) trade."""
+        removed = store.prune()
+        if removed:
+            logger.debug("gamersberg deep: pruned %d expired trade(s) from store", removed)
+        known = store.known_ids()
+        fetched: dict[str, dict] = {}
+        known_page_streak = 0
+        page = 1
+        while page <= DEEP_MAX_TRADE_PAGES:
+            resp = request_with_retry(
+                self._client, "GET", f"/api/v1/trade/list/all/{GAME}", params={"page": page},
+                rate_limiter=self._rate_limiter,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            batch = body if isinstance(body, list) else list(body.values())
+
+            unseen_this_fetch = 0
+            unknown_to_store = 0
+            for t in batch:
+                tid = str(t.get("id"))
+                if tid not in fetched:
+                    unseen_this_fetch += 1
+                    fetched[tid] = t
+                if tid not in known:
+                    unknown_to_store += 1
+            logger.debug(
+                "gamersberg deep: page %d -> %d trades (%d unseen, %d new to store)",
+                page, len(batch), unseen_this_fetch, unknown_to_store,
+            )
+            if on_page_done is not None:
+                on_page_done(page, unknown_to_store)
+
+            if not batch or unseen_this_fetch == 0:
+                break  # true end of feed (or the API started repeating itself)
+            if unknown_to_store == 0:
+                known_page_streak += 1
+                if known_page_streak >= KNOWN_PAGE_STREAK_TO_STOP:
+                    logger.debug(
+                        "gamersberg deep: %d consecutive fully-known pages — stopping early",
+                        known_page_streak,
+                    )
+                    break
+            else:
+                known_page_streak = 0
+            page += 1
+        else:
+            logger.warning(
+                "gamersberg deep: hit %d-page cap — feed may extend further", DEEP_MAX_TRADE_PAGES
+            )
+
+        new = store.merge(list(fetched.values()))
+        active = store.active()
+        logger.info(
+            "gamersberg deep: fetched %d trade(s) across %d page(s), %d new to store, "
+            "%d active total",
+            len(fetched), min(page, DEEP_MAX_TRADE_PAGES), new, len(active),
+        )
+        return active
 
     def _fetch_all_trade_pages(self) -> list[dict]:
         seen: dict[str, dict] = {}

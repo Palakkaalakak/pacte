@@ -1,0 +1,31 @@
+{
+  "inventory_path": "config/inventory.ci.json",
+  "goals_path": "config/goals.ci.json",
+  "scan_interval_minutes": 10,
+  "digest_interval_minutes": 30,
+  "alert_items": ["Dragon", "Kitsune"],
+  "rules": [
+    {
+      "name": "Kitsune deals - instant",
+      "frequency_minutes": 0,
+      "gives_items": ["Kitsune"],
+      "verdicts": ["win"]
+    },
+    {
+      "name": "Big profit - hourly batch",
+      "frequency_minutes": 60,
+      "min_profit": 50000000,
+      "min_confidence": 70
+    }
+  ],
+  "sources": ["gamersberg", "bloxfruitsvalues"],
+  "send_empty_digest": false,
+  "max_matches_per_email": 40,
+  "email": {
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 587,
+    "username": "you@gmail.com",
+    "password": "",
+    "to_addrs": ["you@gmail.com"]
+  }
+}

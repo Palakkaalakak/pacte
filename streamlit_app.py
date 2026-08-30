@@ -6,21 +6,21 @@ own inventory/goals right here), tap "Find Trades".
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from blox_trade_finder.core.matcher import find_matches
-from blox_trade_finder.core.normalize import build_listings, build_listings_bfv, inventory_counts
 from blox_trade_finder.models import Goals, Inventory, InventoryEntry
-from blox_trade_finder.sources.bloxfruitsvalues import BloxFruitsValuesSource
+from blox_trade_finder.scan import ScanProgress, run_scan
 from blox_trade_finder.sources.gamersberg import GamersbergSource
 from blox_trade_finder.ui.table import format_value
 
 PRESETS_DIR = Path(__file__).parent / "config" / "presets"
+USER_INVENTORIES_DIR = Path(__file__).parent / "config" / "user_inventories"
+WATCHER_CONFIG_PATH = Path(__file__).parent / "config" / "watcher.json"
 
 INVENTORY_PRESETS = {
     "Palakkaalakak's": PRESETS_DIR / "creation_inventory.json",
@@ -41,6 +41,25 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "header_inventory": {"en": "1. What you own", "it": "1. Cosa possiedi"},
     "mode_saved": {"en": "Use a saved setup", "it": "Usa una configurazione salvata"},
+    "mode_my_saved": {"en": "My saved inventories", "it": "I miei inventari salvati"},
+    "no_saved_inventories": {
+        "en": "No saved inventories yet. Build one in \"Build my own\" and save it.",
+        "it": "Nessun inventario salvato. Creane uno in \"Crea la tua\" e salvalo.",
+    },
+    "my_saved_inventory": {"en": "Your saved inventory", "it": "Il tuo inventario salvato"},
+    "edit_this_inventory": {"en": "✏️ Edit this inventory", "it": "✏️ Modifica questo inventario"},
+    "delete_this_inventory": {"en": "🗑️ Delete", "it": "🗑️ Elimina"},
+    "deleted_inventory": {"en": "Deleted \"{name}\".", "it": "Eliminato \"{name}\"."},
+    "save_inventory_name": {
+        "en": "Name to save this inventory as",
+        "it": "Nome con cui salvare questo inventario",
+    },
+    "save_inventory_btn": {"en": "💾 Save inventory", "it": "💾 Salva inventario"},
+    "saved_inventory_ok": {"en": "Saved \"{name}\"!", "it": "Salvato \"{name}\"!"},
+    "save_needs_name_items": {
+        "en": "Pick at least one item and enter a name before saving.",
+        "it": "Scegli almeno un oggetto e inserisci un nome prima di salvare.",
+    },
     "mode_build_own": {"en": "Build my own", "it": "Crea la tua"},
     "mode_choose_own": {"en": "Choose my own", "it": "Scegli i tuoi obiettivi"},
     "saved_inventory": {"en": "Saved inventory", "it": "Inventario salvato"},
@@ -120,6 +139,111 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "see_custom_goals": {
         "en": "See what these goals look for",
         "it": "Guarda cosa cercano questi obiettivi",
+    },
+    "header_sources": {"en": "3. Where to look", "it": "3. Dove cercare"},
+    "sources_both": {"en": "Both sites", "it": "Entrambi i siti"},
+    "sources_gb_only": {"en": "Gamersberg only", "it": "Solo Gamersberg"},
+    "sources_bfv_only": {"en": "bloxfruitsvalues.com only", "it": "Solo bloxfruitsvalues.com"},
+    "sources_help": {
+        "en": "Gamersberg is scanned deeply (hundreds of pages, cached between runs).",
+        "it": "Gamersberg viene scansionato in profondità (centinaia di pagine, con cache tra le esecuzioni).",
+    },
+    "progress_gb_deep": {
+        "en": "Deep-scanning Gamersberg... (page {page}, {new} new trades)",
+        "it": "Scansione profonda di Gamersberg... (pagina {page}, {new} nuovi scambi)",
+    },
+    "watcher_header": {
+        "en": "📧 Automatic scanning & email alerts (watcher)",
+        "it": "📧 Scansione automatica e avvisi email (watcher)",
+    },
+    "watcher_intro": {
+        "en": "Save a watcher config here, then run `python -m blox_trade_finder.watcher --config "
+        "config/watcher.json` on any always-on machine. It scans every few minutes, emails a digest "
+        "on a schedule, and sends instant alerts when specific fruits appear.",
+        "it": "Salva qui una configurazione del watcher, poi esegui `python -m blox_trade_finder.watcher "
+        "--config config/watcher.json` su una macchina sempre accesa. Scansiona ogni pochi minuti, "
+        "invia un riepilogo via email a intervalli regolari e avvisi istantanei quando compaiono "
+        "frutti specifici.",
+    },
+    "watcher_scan_interval": {"en": "Scan every (minutes)", "it": "Scansiona ogni (minuti)"},
+    "watcher_digest_interval": {
+        "en": "Email digest every (minutes)",
+        "it": "Riepilogo email ogni (minuti)",
+    },
+    "watcher_alert_items": {
+        "en": "Instant email the moment a trade gives one of these",
+        "it": "Email istantanea appena uno scambio offre uno di questi",
+    },
+    "watcher_smtp_host": {"en": "SMTP server", "it": "Server SMTP"},
+    "watcher_smtp_port": {"en": "SMTP port", "it": "Porta SMTP"},
+    "watcher_smtp_username": {"en": "SMTP username (your email)", "it": "Username SMTP (la tua email)"},
+    "watcher_smtp_password": {
+        "en": "SMTP password — Gmail: use an App Password",
+        "it": "Password SMTP — Gmail: usa una App Password",
+    },
+    "watcher_to_addr": {"en": "Send alerts to (email)", "it": "Invia avvisi a (email)"},
+    "watcher_save_btn": {"en": "💾 Save watcher config", "it": "💾 Salva configurazione watcher"},
+    "watcher_saved": {
+        "en": "Watcher config saved to config/watcher.json (inventory & goals snapshotted too). "
+        "Run: `python -m blox_trade_finder.watcher --config config/watcher.json`",
+        "it": "Configurazione salvata in config/watcher.json (anche inventario e obiettivi). "
+        "Esegui: `python -m blox_trade_finder.watcher --config config/watcher.json`",
+    },
+    "watcher_needs_inventory": {
+        "en": "Set up an inventory with at least one item first — the watcher scans with it.",
+        "it": "Configura prima un inventario con almeno un oggetto — il watcher lo usa per la scansione.",
+    },
+    "rules_header": {
+        "en": "🔔 Alert rules — what to email about & how often",
+        "it": "🔔 Regole di avviso — cosa segnalare via email e ogni quanto",
+    },
+    "rules_intro": {
+        "en": "Each rule picks WHICH trades you care about (profit, items given/asked, verdict…) "
+        "and HOW OFTEN to email about them: 0 minutes = instant email, otherwise one batched "
+        "email every N minutes. A trade can trigger several rules; trades no rule claims go "
+        "into the regular digest.",
+        "it": "Ogni regola sceglie QUALI scambi ti interessano (profitto, oggetti offerti/richiesti, "
+        "verdetto…) e OGNI QUANTO inviarli via email: 0 minuti = email istantanea, altrimenti "
+        "un'email raggruppata ogni N minuti. Uno scambio può attivare più regole; gli scambi non "
+        "catturati da nessuna regola finiscono nel riepilogo normale.",
+    },
+    "rules_none": {
+        "en": "No rules yet — add one below.",
+        "it": "Nessuna regola — aggiungine una qui sotto.",
+    },
+    "rule_add_btn": {"en": "➕ Add alert rule", "it": "➕ Aggiungi regola di avviso"},
+    "rule_delete_btn": {"en": "🗑️ Delete rule", "it": "🗑️ Elimina regola"},
+    "rule_name": {"en": "Rule name", "it": "Nome regola"},
+    "rule_enabled": {"en": "Enabled", "it": "Attiva"},
+    "rule_frequency": {"en": "Email every (min)", "it": "Email ogni (min)"},
+    "rule_frequency_help": {
+        "en": "0 = instant email the moment a matching trade appears; N = at most one batched email every N minutes.",
+        "it": "0 = email istantanea appena appare uno scambio corrispondente; N = al massimo un'email raggruppata ogni N minuti.",
+    },
+    "rule_zero_off": {"en": "0 = condition off", "it": "0 = condizione disattivata"},
+    "rule_min_profit": {"en": "Min profit (millions)", "it": "Profitto min (milioni)"},
+    "rule_min_profit_pct": {"en": "Min profit %", "it": "Profitto min %"},
+    "rule_min_get_value": {"en": "Min value received (millions)", "it": "Valore min ricevuto (milioni)"},
+    "rule_max_give_value": {"en": "Max value given (millions)", "it": "Valore max dato (milioni)"},
+    "rule_gives_items": {
+        "en": "Trade must GIVE one of these items",
+        "it": "Lo scambio deve OFFRIRE uno di questi oggetti",
+    },
+    "rule_wants_items": {
+        "en": "Trade must ASK FOR one of these items",
+        "it": "Lo scambio deve RICHIEDERE uno di questi oggetti",
+    },
+    "rule_include_permanent": {
+        "en": "Also match Permanent variants",
+        "it": "Includi anche le varianti Permanent",
+    },
+    "rule_verdicts": {"en": "Verdict (empty = any)", "it": "Verdetto (vuoto = qualsiasi)"},
+    "rule_min_confidence": {"en": "Min confidence (0=off)", "it": "Confidenza min (0=off)"},
+    "rule_min_demand": {"en": "Min demand (0=off)", "it": "Domanda min (0=off)"},
+    "rule_sources": {"en": "Sources (empty = any)", "it": "Fonti (vuoto = qualsiasi)"},
+    "rule_name_dup": {
+        "en": "Two rules have the same name — rule names must be unique.",
+        "it": "Due regole hanno lo stesso nome — i nomi delle regole devono essere unici.",
     },
     "find_trades": {"en": "🔎 Find Trades", "it": "🔎 Trova Scambi"},
     "need_item_warning": {
@@ -238,6 +362,34 @@ def _load_json(path: Path) -> dict:
         return json.load(f)
 
 
+def _safe_filename(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9 _-]", "", name).strip().replace(" ", "_")
+    return cleaned or "inventory"
+
+
+def _list_user_inventories() -> dict[str, Path]:
+    """Map display name -> path for every saved user inventory."""
+    result: dict[str, Path] = {}
+    if USER_INVENTORIES_DIR.is_dir():
+        for path in sorted(USER_INVENTORIES_DIR.glob("*.json")):
+            try:
+                data = _load_json(path)
+                display = data.get("display_name") or path.stem
+            except (json.JSONDecodeError, OSError):
+                continue
+            result[display] = path
+    return result
+
+
+def _save_user_inventory(name: str, inventory: Inventory) -> None:
+    USER_INVENTORIES_DIR.mkdir(parents=True, exist_ok=True)
+    data = inventory.model_dump()
+    data["display_name"] = name
+    path = USER_INVENTORIES_DIR / f"{_safe_filename(name)}.json"
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
 @st.cache_resource(show_spinner=False)
 def _catalog_names() -> list[str]:
     source = GamersbergSource()
@@ -320,8 +472,18 @@ st.write(t("intro"))
 
 # ---------------------------------------------------------------- inventory
 st.header(t("header_inventory"))
+
+# Switch the mode radio to the builder BEFORE it is instantiated (Streamlit
+# forbids mutating a widget's session key after creation in the same run).
+if st.session_state.pop("switch_to_builder", False):
+    st.session_state["inventory_mode_radio"] = t("mode_build_own")
+
 inventory_mode = st.radio(
-    "Inventory", [t("mode_saved"), t("mode_build_own")], horizontal=True, label_visibility="collapsed"
+    "Inventory",
+    [t("mode_saved"), t("mode_my_saved"), t("mode_build_own")],
+    horizontal=True,
+    label_visibility="collapsed",
+    key="inventory_mode_radio",
 )
 
 if inventory_mode == t("mode_saved"):
@@ -330,9 +492,40 @@ if inventory_mode == t("mode_saved"):
     with st.expander(t("see_inventory", name=inventory_choice)):
         for line in _inventory_preview_lines(inventory):
             st.write(f"- {line}")
+elif inventory_mode == t("mode_my_saved"):
+    user_invs = _list_user_inventories()
+    if not user_invs:
+        st.info(t("no_saved_inventories"))
+        inventory = Inventory(items=[])
+    else:
+        user_choice = st.selectbox(t("my_saved_inventory"), list(user_invs.keys()))
+        raw = _load_json(user_invs[user_choice])
+        raw.pop("display_name", None)
+        inventory = Inventory.model_validate(raw)
+        with st.expander(t("see_inventory", name=user_choice)):
+            for line in _inventory_preview_lines(inventory):
+                st.write(f"- {line}")
+        col_edit, col_delete = st.columns(2)
+        with col_edit:
+            if st.button(t("edit_this_inventory"), use_container_width=True):
+                # Seed the builder with this inventory, then flip modes.
+                st.session_state["builder_prefill_names"] = [e.name for e in inventory.items]
+                for e in inventory.items:
+                    st.session_state[f"qty_{e.name}"] = e.qty
+                st.session_state["builder_prefill_save_name"] = user_choice
+                st.session_state["switch_to_builder"] = True
+                st.rerun()
+        with col_delete:
+            if st.button(t("delete_this_inventory"), use_container_width=True):
+                user_invs[user_choice].unlink(missing_ok=True)
+                st.toast(t("deleted_inventory", name=user_choice))
+                st.rerun()
 else:
     all_items = _catalog_names()
-    owned_names = st.multiselect(t("owned_items"), all_items)
+    prefill = st.session_state.pop("builder_prefill_names", None)
+    if prefill is not None:
+        st.session_state["builder_multiselect"] = [n for n in prefill if n in all_items]
+    owned_names = st.multiselect(t("owned_items"), all_items, key="builder_multiselect")
     entries = []
     if owned_names:
         st.caption(t("qty_caption"))
@@ -340,6 +533,22 @@ else:
             qty = st.number_input(name, min_value=1, value=1, step=1, key=f"qty_{name}")
             entries.append(InventoryEntry(name=name, qty=qty))
     inventory = Inventory(items=entries)
+
+    col_name, col_save = st.columns([3, 1])
+    with col_name:
+        save_name = st.text_input(
+            t("save_inventory_name"),
+            value=st.session_state.pop("builder_prefill_save_name", ""),
+            key="builder_save_name",
+        )
+    with col_save:
+        st.write("")  # vertical alignment shim
+        if st.button(t("save_inventory_btn"), use_container_width=True):
+            if save_name.strip() and inventory.items:
+                _save_user_inventory(save_name.strip(), inventory)
+                st.success(t("saved_inventory_ok", name=save_name.strip()))
+            else:
+                st.warning(t("save_needs_name_items"))
 
 # -------------------------------------------------------------------- goals
 st.header(t("header_goals"))
@@ -413,6 +622,22 @@ else:
         for line in _goals_preview_lines(goals):
             st.write(f"- {line}")
 
+# ------------------------------------------------------------------ sources
+st.header(t("header_sources"))
+SOURCE_CHOICES = {
+    t("sources_both"): ["gamersberg", "bloxfruitsvalues"],
+    t("sources_gb_only"): ["gamersberg"],
+    t("sources_bfv_only"): ["bloxfruitsvalues"],
+}
+source_label = st.radio(
+    "Sources",
+    list(SOURCE_CHOICES.keys()),
+    horizontal=True,
+    label_visibility="collapsed",
+    help=t("sources_help"),
+)
+selected_sources = SOURCE_CHOICES[source_label]
+
 # ------------------------------------------------------------------- action
 find_clicked = st.button(t("find_trades"), type="primary", use_container_width=True)
 
@@ -421,42 +646,46 @@ if find_clicked:
         st.warning(t("need_item_warning"))
         st.stop()
 
-    gamersberg = GamersbergSource()
-    bfv = BloxFruitsValuesSource()
     progress = st.progress(0, text=t("progress_start"))
-    try:
-        item_names = [entry.name for entry in inventory.items]
 
-        progress.progress(5, text=t("progress_catalog"))
-        catalog = gamersberg.fetch_catalog(fresh=False)
+    def _safe_progress(pct: int, text: str) -> None:
+        # Progress callbacks may fire from worker threads; Streamlit calls
+        # from a non-script thread raise — swallow rather than kill the scan.
+        try:
+            progress.progress(min(max(pct, 0), 100), text=text)
+        except Exception:
+            pass
 
-        progress.progress(15, text=t("progress_gamersberg_bg"))
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            f_gamersberg_raw = executor.submit(gamersberg.fetch_listings_raw, fresh=False)
+    def _on_phase(phase: str) -> None:
+        if phase == "catalog":
+            _safe_progress(10, t("progress_catalog"))
+        elif phase == "matching":
+            _safe_progress(92, t("progress_matching"))
 
-            bfv_raw: list[dict] = []
-            if item_names:
-                total = len(item_names)
+    def _on_bfv_item(name: str, done: int, total: int) -> None:
+        pct = 15 + int(done / max(total, 1) * 60)
+        _safe_progress(min(pct, 80), t("progress_bfv", done=done, total=total, name=name))
 
-                def _on_item_done(name: str, _count: list[int] = [0]) -> None:
-                    _count[0] += 1
-                    pct = 15 + int(_count[0] / total * 65)
-                    progress.progress(min(pct, 80), text=t("progress_bfv", done=_count[0], total=total, name=name))
+    def _on_gb_page(page: int, new: int) -> None:
+        _safe_progress(min(15 + page // 6, 85), t("progress_gb_deep", page=page, new=new))
 
-                bfv_raw = bfv.fetch_listings_raw(item_names=item_names, fresh=False, on_item_done=_on_item_done)
-
-            progress.progress(85, text=t("progress_wait_gamersberg"))
-            gamersberg_raw = f_gamersberg_raw.result()
-
-        progress.progress(92, text=t("progress_matching"))
-        listings = build_listings(gamersberg_raw, catalog) + build_listings_bfv(bfv_raw, catalog)
-        inv_counts = inventory_counts(inventory)
-        matches = find_matches(listings, inv_counts, goals)
-        progress.progress(100, text=t("progress_done"))
-    finally:
-        gamersberg.close()
-        bfv.close()
+    result = run_scan(
+        inventory,
+        goals,
+        sources=selected_sources,
+        deep=True,
+        progress=ScanProgress(
+            on_phase=_on_phase,
+            on_bfv_item_done=_on_bfv_item,
+            on_gb_page_done=_on_gb_page,
+        ),
+    )
+    progress.progress(100, text=t("progress_done"))
     progress.empty()
+
+    for warning in result.name_warnings:
+        st.warning(warning)
+    matches = result.matches
 
     st.success(t("found_matches", count=len(matches)))
 
@@ -484,3 +713,232 @@ if find_clicked:
         )
     else:
         st.info(t("no_matches"))
+
+# ------------------------------------------------------------------ watcher
+with st.expander(t("watcher_header")):
+    st.write(t("watcher_intro"))
+
+    existing_cfg: dict = {}
+    if WATCHER_CONFIG_PATH.is_file():
+        try:
+            existing_cfg = _load_json(WATCHER_CONFIG_PATH)
+        except (json.JSONDecodeError, OSError):
+            existing_cfg = {}
+    existing_email = existing_cfg.get("email") or {}
+
+    col_scan, col_digest = st.columns(2)
+    with col_scan:
+        scan_minutes = st.number_input(
+            t("watcher_scan_interval"), min_value=2, max_value=120,
+            value=int(existing_cfg.get("scan_interval_minutes", 10)),
+        )
+    with col_digest:
+        digest_minutes = st.number_input(
+            t("watcher_digest_interval"), min_value=5, max_value=720,
+            value=int(existing_cfg.get("digest_interval_minutes", 30)),
+        )
+
+    catalog_names = _catalog_names()
+    alert_defaults = [n for n in existing_cfg.get("alert_items", []) if n in catalog_names]
+    alert_items = st.multiselect(t("watcher_alert_items"), catalog_names, default=alert_defaults)
+
+    col_host, col_port = st.columns(2)
+    with col_host:
+        smtp_host = st.text_input(
+            t("watcher_smtp_host"), value=existing_email.get("smtp_host", "smtp.gmail.com"),
+        )
+    with col_port:
+        smtp_port = st.number_input(
+            t("watcher_smtp_port"), min_value=1, max_value=65535,
+            value=int(existing_email.get("smtp_port", 587)),
+        )
+    col_user, col_pass = st.columns(2)
+    with col_user:
+        smtp_username = st.text_input(
+            t("watcher_smtp_username"), value=existing_email.get("username", ""),
+        )
+    with col_pass:
+        smtp_password = st.text_input(
+            t("watcher_smtp_password"), value=existing_email.get("password", ""), type="password",
+        )
+    existing_to = existing_email.get("to_addrs") or [""]
+    to_addr = st.text_input(t("watcher_to_addr"), value=existing_to[0])
+
+    # ---------------------------------------------------------- alert rules
+    st.subheader(t("rules_header"))
+    st.caption(t("rules_intro"))
+
+    VERDICT_CHOICES = ["win", "fair", "loss"]
+    RULE_SOURCE_CHOICES = ["gamersberg", "bloxfruitsvalues"]
+
+    if "alert_rules" not in st.session_state:
+        loaded_rules = [dict(r) for r in existing_cfg.get("rules", [])]
+        for i, r in enumerate(loaded_rules):
+            r["_uid"] = f"loaded_{i}"
+        st.session_state["alert_rules"] = loaded_rules
+        st.session_state["alert_rule_seq"] = len(loaded_rules)
+
+    if st.button(t("rule_add_btn"), use_container_width=True):
+        st.session_state["alert_rule_seq"] = st.session_state.get("alert_rule_seq", 0) + 1
+        seq = st.session_state["alert_rule_seq"]
+        st.session_state["alert_rules"].append(
+            {"name": f"Rule {seq}", "frequency_minutes": 0, "_uid": f"new_{seq}"}
+        )
+        st.rerun()
+
+    if not st.session_state["alert_rules"]:
+        st.info(t("rules_none"))
+
+    edited_rules: list[dict] = []
+    for idx, raw_rule in enumerate(st.session_state["alert_rules"]):
+        uid = raw_rule.get("_uid") or f"idx_{idx}"
+        title = raw_rule.get("name") or f"Rule {idx + 1}"
+        freq = int(raw_rule.get("frequency_minutes", 0) or 0)
+        badge = "⚡" if freq == 0 else f"⏱ {freq}m"
+        with st.container(border=True):
+            st.markdown(f"**{badge} {title}**")
+            col_name, col_freq, col_on = st.columns([3, 2, 1])
+            with col_name:
+                r_name = st.text_input(t("rule_name"), value=title, key=f"rule_name_{uid}")
+            with col_freq:
+                r_freq = st.number_input(
+                    t("rule_frequency"), min_value=0, max_value=1440, value=freq,
+                    help=t("rule_frequency_help"), key=f"rule_freq_{uid}",
+                )
+            with col_on:
+                r_enabled = st.checkbox(
+                    t("rule_enabled"), value=bool(raw_rule.get("enabled", True)),
+                    key=f"rule_on_{uid}",
+                )
+
+            st.caption(t("rule_zero_off"))
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                r_min_profit_m = st.number_input(
+                    t("rule_min_profit"), min_value=0, max_value=10_000,
+                    value=int((raw_rule.get("min_profit") or 0) / 1_000_000),
+                    step=5, key=f"rule_minprofit_{uid}",
+                )
+                r_min_get_m = st.number_input(
+                    t("rule_min_get_value"), min_value=0, max_value=10_000,
+                    value=int((raw_rule.get("min_get_value") or 0) / 1_000_000),
+                    step=5, key=f"rule_minget_{uid}",
+                )
+            with col_p2:
+                r_min_pct = st.number_input(
+                    t("rule_min_profit_pct"), min_value=0, max_value=1000,
+                    value=int(round((raw_rule.get("min_profit_pct") or 0) * 100)),
+                    step=5, key=f"rule_minpct_{uid}",
+                )
+                r_max_give_m = st.number_input(
+                    t("rule_max_give_value"), min_value=0, max_value=10_000,
+                    value=int((raw_rule.get("max_give_value") or 0) / 1_000_000),
+                    step=5, key=f"rule_maxgive_{uid}",
+                )
+
+            r_gives = st.multiselect(
+                t("rule_gives_items"), catalog_names,
+                default=[n for n in raw_rule.get("gives_items", []) if n in catalog_names],
+                key=f"rule_gives_{uid}",
+            )
+            r_wants = st.multiselect(
+                t("rule_wants_items"), catalog_names,
+                default=[n for n in raw_rule.get("wants_items", []) if n in catalog_names],
+                key=f"rule_wants_{uid}",
+            )
+            r_perm = st.checkbox(
+                t("rule_include_permanent"),
+                value=bool(raw_rule.get("include_permanent", True)),
+                key=f"rule_perm_{uid}",
+            )
+
+            col_q1, col_q2, col_q3 = st.columns(3)
+            with col_q1:
+                r_verdicts = st.multiselect(
+                    t("rule_verdicts"), VERDICT_CHOICES,
+                    default=[v for v in raw_rule.get("verdicts", []) if v in VERDICT_CHOICES],
+                    key=f"rule_verdicts_{uid}",
+                )
+            with col_q2:
+                r_min_conf = st.number_input(
+                    t("rule_min_confidence"), min_value=0, max_value=100,
+                    value=int(raw_rule.get("min_confidence") or 0),
+                    step=5, key=f"rule_minconf_{uid}",
+                )
+            with col_q3:
+                r_min_demand = st.number_input(
+                    t("rule_min_demand"), min_value=0, max_value=10,
+                    value=int(raw_rule.get("min_demand") or 0),
+                    key=f"rule_mindemand_{uid}",
+                )
+            r_sources = st.multiselect(
+                t("rule_sources"), RULE_SOURCE_CHOICES,
+                default=[s for s in raw_rule.get("sources", []) if s in RULE_SOURCE_CHOICES],
+                key=f"rule_sources_{uid}",
+            )
+
+            if st.button(t("rule_delete_btn"), key=f"rule_del_{uid}", use_container_width=True):
+                st.session_state["alert_rules"].pop(idx)
+                st.rerun()
+
+            edited_rules.append({
+                "_uid": uid,
+                "name": r_name.strip() or f"Rule {idx + 1}",
+                "enabled": r_enabled,
+                "frequency_minutes": int(r_freq),
+                "min_profit": r_min_profit_m * 1_000_000 if r_min_profit_m > 0 else None,
+                "min_profit_pct": r_min_pct / 100 if r_min_pct > 0 else None,
+                "min_get_value": r_min_get_m * 1_000_000 if r_min_get_m > 0 else None,
+                "max_give_value": r_max_give_m * 1_000_000 if r_max_give_m > 0 else None,
+                "gives_items": r_gives,
+                "wants_items": r_wants,
+                "include_permanent": r_perm,
+                "verdicts": r_verdicts,
+                "min_confidence": r_min_conf if r_min_conf > 0 else None,
+                "min_demand": r_min_demand if r_min_demand > 0 else None,
+                "sources": r_sources,
+            })
+
+    st.session_state["alert_rules"] = edited_rules
+
+    rules_to_save = [{k: v for k, v in r.items() if k != "_uid"} for r in edited_rules]
+    rule_names = [r["name"] for r in rules_to_save]
+
+    if st.button(t("watcher_save_btn"), use_container_width=True):
+        if not inventory.items:
+            st.warning(t("watcher_needs_inventory"))
+        elif len(rule_names) != len(set(rule_names)):
+            st.error(t("rule_name_dup"))
+        else:
+            config_dir = WATCHER_CONFIG_PATH.parent
+            config_dir.mkdir(parents=True, exist_ok=True)
+            inv_path = config_dir / "watcher_inventory.json"
+            goals_path = config_dir / "watcher_goals.json"
+            with inv_path.open("w", encoding="utf-8") as f:
+                json.dump(inventory.model_dump(), f, indent=2)
+            with goals_path.open("w", encoding="utf-8") as f:
+                json.dump(goals.model_dump(), f, indent=2)
+
+            email_cfg = None
+            if smtp_host.strip() and smtp_username.strip() and smtp_password and to_addr.strip():
+                email_cfg = {
+                    "smtp_host": smtp_host.strip(),
+                    "smtp_port": int(smtp_port),
+                    "username": smtp_username.strip(),
+                    "password": smtp_password,
+                    "to_addrs": [to_addr.strip()],
+                }
+
+            watcher_cfg = {
+                "inventory_path": str(inv_path),
+                "goals_path": str(goals_path),
+                "scan_interval_minutes": int(scan_minutes),
+                "digest_interval_minutes": int(digest_minutes),
+                "alert_items": alert_items,
+                "rules": rules_to_save,
+                "sources": selected_sources,
+                "email": email_cfg,
+            }
+            with WATCHER_CONFIG_PATH.open("w", encoding="utf-8") as f:
+                json.dump(watcher_cfg, f, indent=2)
+            st.success(t("watcher_saved"))

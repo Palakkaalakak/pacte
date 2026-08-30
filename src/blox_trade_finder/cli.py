@@ -21,6 +21,7 @@ from blox_trade_finder.core.normalize import (
 from blox_trade_finder.models import Goals, Inventory
 from blox_trade_finder.sources.bloxfruitsvalues import BloxFruitsValuesSource
 from blox_trade_finder.sources.gamersberg import GamersbergSource
+from blox_trade_finder.store import TradeStore
 from blox_trade_finder.ui.table import format_value, write_matches_to_file
 
 OUTPUT_BASE_DIR = Path("output")
@@ -35,6 +36,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--inventory", type=Path, help="Path to inventory JSON file")
     p.add_argument("--goals", type=Path, help="Path to goals JSON file")
     p.add_argument("--fresh", action="store_true", help="Bypass cache, force a live re-fetch")
+    p.add_argument(
+        "--sources",
+        choices=["gamersberg", "bloxfruitsvalues", "both"],
+        default="both",
+        help="Which trade site(s) to scan (default: both)",
+    )
+    p.add_argument(
+        "--no-deep",
+        action="store_true",
+        help="Skip the deep Gamersberg scan (hundreds of pages, incremental via a persistent "
+        "store) and only fetch the cached shallow feed",
+    )
     p.add_argument(
         "--any",
         action="store_true",
@@ -215,6 +228,11 @@ def main() -> None:
         logger.info("inventory: %s", [(e.name, e.qty) for e in inventory.items])
         logger.info("goals: %s", goals.model_dump())
 
+        use_gamersberg = args.sources in ("gamersberg", "both")
+        use_bfv = args.sources in ("bloxfruitsvalues", "both")
+        deep = not args.no_deep
+        logger.info("sources: gamersberg=%s bfv=%s deep=%s", use_gamersberg, use_bfv, deep)
+
         item_names = [entry.name for entry in inventory.items]
         progress_console = Console(stderr=True)
 
@@ -239,15 +257,34 @@ def main() -> None:
             # http_client.RateLimiter), so run them concurrently while the
             # (fast) Gamersberg catalog fetch happens on the main thread.
             t_catalog = progress.add_task("Fetching Gamersberg catalog...", total=None)
-            t_gb_trades = progress.add_task("Fetching Gamersberg trade feed...", total=None)
+            t_gb_trades = (
+                progress.add_task("Fetching Gamersberg trade feed...", total=None)
+                if use_gamersberg
+                else None
+            )
             t_bfv = (
                 progress.add_task("Querying bloxfruitsvalues.com...", total=len(item_names))
-                if item_names
+                if (use_bfv and item_names)
                 else None
             )
 
             def _fetch_gb_trades() -> list[dict]:
-                raw = gamersberg.fetch_listings_raw(fresh=args.fresh)
+                if not use_gamersberg:
+                    progress.update(t_overall, advance=1)
+                    return []
+
+                def _on_page(page: int, new: int) -> None:
+                    progress.update(
+                        t_gb_trades,
+                        description=f"Fetching Gamersberg trade feed... (page {page}, deep scan)",
+                    )
+
+                raw = gamersberg.fetch_listings_raw(
+                    fresh=args.fresh,
+                    deep=deep,
+                    store=TradeStore() if deep else None,
+                    on_page_done=_on_page if deep else None,
+                )
                 progress.update(
                     t_gb_trades, total=1, completed=1,
                     description=f"Gamersberg trade feed fetched ({len(raw)} trades)",
@@ -256,7 +293,7 @@ def main() -> None:
                 return raw
 
             def _fetch_bfv() -> list[dict]:
-                if not item_names:
+                if not (use_bfv and item_names):
                     progress.update(t_overall, advance=1)
                     return []
 

@@ -5,3 +5,9 @@ __pycache__/
 .venv/
 config/inventory.json
 config/goals.json
+# watcher.json contains your SMTP password — never commit it
+config/watcher.json
+config/watcher_inventory.json
+config/watcher_goals.json
+# personal saved inventories
+config/user_inventories/

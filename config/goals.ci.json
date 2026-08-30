@@ -1,0 +1,21 @@
+{
+  "any": false,
+
+  "value_basis": "gamersberg",
+
+  "min_profit": 0,
+  "min_profit_pct": null,
+  "min_get_value": null,
+  "max_give_value": null,
+  "any_fair": true,
+
+  "min_demand": null,
+  "want_item": null,
+  "exclude_lose_wfl": false,
+
+  "min_confidence": null,
+  "max_age_hours": null,
+  "max_qty_per_fruit": 1,
+
+  "limit": 1000
+}
