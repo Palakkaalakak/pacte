@@ -2,7 +2,7 @@
   "items": [
     { "name": "Portal", "qty": 1 },
     { "name": "Spirit", "qty": 1 },
-    { "name": "Gravity", "qty": 1 }
-
+    { "name": "Gravity", "qty": 1 },
+    { "name": "Yeti", "qty": 1 }
   ]
 }
