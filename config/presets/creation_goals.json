@@ -14,7 +14,7 @@
   "exclude_lose_wfl": false,
 
   "min_confidence": null,
-  "max_age_hours": null,
+  "max_age_hours": 1,
   "max_qty_per_fruit": 1,
 
   "limit": 1000
