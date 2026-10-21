@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from blox_trade_finder.models import Listing, ValueBasis
 
 MAX_CHAINS = 500
+MAX_EXPANSIONS = 200_000  # safety cap on search work when steps are unlimited
 
 
 @dataclass
@@ -51,7 +52,7 @@ def find_chains(
     *,
     value_basis: ValueBasis = "gamersberg",
     max_age_minutes: float = 5,
-    max_steps: int = 3,
+    max_steps: int | None = 3,  # None = unlimited (every item is visited at most once, so it terminates)
     min_profit: int = 0,
     target_names: set[str] | None = None,
     now: datetime | None = None,
@@ -75,13 +76,15 @@ def find_chains(
         by_want[lst.want[0].name.lower()].append(lst)
 
     results: list[Chain] = []
+    expansions = [0]
 
     def value(l: Listing, side: str) -> int:
         item = (l.give if side == "give" else l.want)[0]
         return item.value(value_basis)
 
     def dfs(start_name: str, start_value: int, path: list[Listing], items: list[str]) -> None:
-        if len(results) >= MAX_CHAINS:
+        expansions[0] += 1
+        if len(results) >= MAX_CHAINS or expansions[0] > MAX_EXPANSIONS:
             return
         current = items[-1]
         for lst in by_want.get(current.lower(), []):
@@ -105,7 +108,7 @@ def find_chains(
                     oldest_minutes=max(ages[s.id + s.source] for s in new_path),
                     is_cycle=closes,
                 ))
-            if len(new_path) < max_steps and not closes:
+            if (max_steps is None or len(new_path) < max_steps) and not closes:
                 dfs(start_name, start_value, new_path, new_items)
 
     for name, qty in inventory_counts.items():

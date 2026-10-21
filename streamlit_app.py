@@ -1002,7 +1002,8 @@ if find_clicked or auto_trigger:
 with st.expander(t("chain_header"), expanded=False):
     st.write(t("chain_intro"))
     chain_max_age = st.number_input(t("chain_max_age"), 1, 1440, 5, key="chain_max_age")
-    chain_max_steps = st.slider(t("chain_max_steps"), 2, 5, 3, key="chain_max_steps")
+    chain_unlimited = st.checkbox("♾️ Unlimited steps", value=False, key="chain_unlimited")
+    chain_max_steps = st.slider(t("chain_max_steps"), 2, 10, 3, key="chain_max_steps", disabled=chain_unlimited)
     chain_min_profit = st.slider(t("chain_min_profit"), 0, 200, 0, step=1, key="chain_min_profit")
     if st.button(t("chain_btn"), use_container_width=True, key="chain_btn"):
         if not inventory.items:
@@ -1023,7 +1024,7 @@ with st.expander(t("chain_header"), expanded=False):
                     _cres.listings, inventory_counts(inventory),
                     value_basis=goals.value_basis,
                     max_age_minutes=chain_max_age,
-                    max_steps=chain_max_steps,
+                    max_steps=None if chain_unlimited else chain_max_steps,
                     min_profit=chain_min_profit * 1_000_000,
                     target_names=_targets,
                 )

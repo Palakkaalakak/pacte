@@ -41,3 +41,11 @@ def test_cycle_closes_back_to_start() -> None:
     ls = [_l("a", X, Y), _l("b", Y, Z), _l("c", Z, X)]
     chains = find_chains(ls, Counter({"x": 1}), now=NOW, target_names={"x"})
     assert any(c.is_cycle and c.items == ["X", "Y", "Z", "X"] for c in chains)
+
+
+def test_unlimited_steps_finds_long_chain() -> None:
+    items = [_item(f"I{n}", 10 + n, n) for n in range(8)]
+    ls = [_l(f"l{n}", items[n], items[n + 1]) for n in range(7)]
+    chains = find_chains(ls, Counter({"i0": 1}), now=NOW, max_steps=None)
+    assert len(chains[0].steps) == 7
+    assert max(len(c.steps) for c in find_chains(ls, Counter({"i0": 1}), now=NOW, max_steps=3)) == 3
