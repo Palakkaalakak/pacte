@@ -191,6 +191,20 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "notify_test": {"en": "🔊 Test alarm sound", "it": "🔊 Prova suono allarme"},
     "notify_alert": {"en": "🚨 {n} new notify hit(s)!", "it": "🚨 {n} nuovi risultati da notificare!"},
     "col_notify": {"en": "🔔", "it": "🔔"},
+    "chain_header": {"en": "🔗 Chain trades (research mode)", "it": "🔗 Scambi a catena (modalità ricerca)"},
+    "chain_intro": {
+        "en": "Finds sequences where each trade wants what the previous one gave (X→Y, Y→Z, Z→X…). Start from an item you own and run the steps back to back for profit or to reach an item you want. Only 1-for-1 listings are chained.",
+        "it": "Trova sequenze in cui ogni scambio richiede ciò che il precedente ha dato (X→Y, Y→Z, Z→X…). Parti da un oggetto che possiedi ed esegui i passaggi di fila per profitto o per ottenere ciò che vuoi. Solo annunci 1 a 1.",
+    },
+    "chain_max_age": {"en": "Max age of each step (minutes)", "it": "Età massima di ogni passaggio (minuti)"},
+    "chain_max_steps": {"en": "Max steps in a chain", "it": "Passaggi massimi in una catena"},
+    "chain_min_profit": {"en": "Min profit (millions, 0 = any gain)", "it": "Profitto min (milioni, 0 = qualsiasi guadagno)"},
+    "chain_btn": {"en": "🔗 Find Chain Trades", "it": "🔗 Trova Scambi a Catena"},
+    "chain_found": {"en": "Found {n} chain(s).", "it": "Trovate {n} catene."},
+    "chain_none": {
+        "en": "No chains right now. Try a larger max age or more steps — chains need several fresh listings to line up.",
+        "it": "Nessuna catena al momento. Prova un'età massima maggiore o più passaggi.",
+    },
     "header_sources": {"en": "4. Where to look", "it": "4. Dove cercare"},
     "sources_both": {"en": "Both sites", "it": "Entrambi i siti"},
     "sources_gb_only": {"en": "Gamersberg only", "it": "Solo Gamersberg"},
@@ -983,6 +997,59 @@ if find_clicked or auto_trigger:
             )
         else:
             st.info(t("no_matches"))
+
+# ------------------------------------------------------------------- chains
+with st.expander(t("chain_header"), expanded=False):
+    st.write(t("chain_intro"))
+    chain_max_age = st.number_input(t("chain_max_age"), 1, 1440, 5, key="chain_max_age")
+    chain_max_steps = st.slider(t("chain_max_steps"), 2, 5, 3, key="chain_max_steps")
+    chain_min_profit = st.slider(t("chain_min_profit"), 0, 200, 0, step=1, key="chain_min_profit")
+    if st.button(t("chain_btn"), use_container_width=True, key="chain_btn"):
+        if not inventory.items:
+            st.warning(t("need_item_warning"))
+        else:
+            from blox_trade_finder.core.chains import find_chains
+            from blox_trade_finder.core.normalize import inventory_counts
+            try:
+                with st.spinner(t("progress_start")):
+                    _cres = run_scan(
+                        inventory, Goals(any=True), sources=selected_sources, deep=True,
+                        gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
+                    )
+                _targets = set()
+                if goals.want_item:
+                    _targets = {goals.want_item} if isinstance(goals.want_item, str) else set(goals.want_item)
+                chains = find_chains(
+                    _cres.listings, inventory_counts(inventory),
+                    value_basis=goals.value_basis,
+                    max_age_minutes=chain_max_age,
+                    max_steps=chain_max_steps,
+                    min_profit=chain_min_profit * 1_000_000,
+                    target_names=_targets,
+                )
+            except Exception as exc:
+                st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
+                chains = None
+            if chains is not None:
+                st.success(t("chain_found", n=len(chains)))
+                if not chains:
+                    st.info(t("chain_none"))
+                else:
+                    st.dataframe(
+                        pd.DataFrame([{
+                            "Chain": " → ".join(c.items),
+                            "Steps": len(c.steps),
+                            t("col_profit"): format_value(c.profit),
+                            t("col_profit_pct"): f"{c.profit_pct:+.0%}",
+                            "Oldest step": f"{c.oldest_minutes:.0f}m",
+                        } for c in chains[:200]]),
+                        use_container_width=True, hide_index=True,
+                    )
+                    for c in chains[:25]:
+                        st.markdown(
+                            f"**{' → '.join(c.items)}** ({format_value(c.profit)}): "
+                            + " · ".join(f"[step {i}]({l.url})" for i, l in enumerate(c.steps, 1))
+                        )
 
 # ------------------------------------------------------------------ watcher
 with st.expander(t("watcher_header")):
