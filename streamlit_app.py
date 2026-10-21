@@ -17,8 +17,13 @@ from pathlib import Path
 _SRC = str(Path(__file__).parent / "src")
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
-for _mod in [m for m in list(sys.modules) if m.startswith("blox_trade_finder")]:
-    del sys.modules[_mod]  # drop any already-imported stale copies
+# Purge stale copies only once per process. Streamlit re-executes this script on
+# every rerun; deleting modules each time races with imports in other
+# sessions/threads and raises KeyError inside importlib (_find_and_load).
+if not getattr(sys, "_blox_modules_purged", False):
+    for _mod in [m for m in list(sys.modules) if m.startswith("blox_trade_finder")]:
+        sys.modules.pop(_mod, None)
+    sys._blox_modules_purged = True
 
 import pandas as pd
 import streamlit as st
