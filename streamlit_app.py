@@ -560,17 +560,29 @@ def _list_user_notify() -> dict[str, Path]:
 
 
 def _alarm_html(count: int) -> str:
-    """Loud siren via WebAudio. Unique per call so the iframe re-runs it."""
-    return f"""<script>/* {time.time()}-{count} */
+    """Loud siren via WebAudio with an in-frame Stop button (no rerun needed,
+    so it works instantly even while live mode is sleeping). Unique per call so
+    the iframe re-runs it. Auto-stops after 60 s."""
+    return f"""<div style="font-family:sans-serif">
+<button id="stop" style="width:100%;padding:12px;font-size:18px;font-weight:bold;background:#d32f2f;color:#fff;border:0;border-radius:8px;cursor:pointer">🔇 STOP ALARM</button>
+</div>
+<script>/* {time.time()}-{count} */
 (function(){{
-  try {{ window.parent.document.title = "🚨 {count} TRADE HIT(S)!"; }} catch(e) {{}}
+  var title = null, C = null, o = null, timer = null;
+  try {{ title = window.parent.document.title; window.parent.document.title = "🚨 {count} TRADE HIT(S)!"; }} catch(e) {{}}
+  function stop() {{
+    try {{ clearInterval(timer); o && o.stop(); C && C.close(); }} catch(e) {{}}
+    try {{ if (title !== null) window.parent.document.title = title; }} catch(e) {{}}
+    var b = document.getElementById("stop"); b.textContent = "✅ Alarm stopped"; b.disabled = true;
+  }}
+  document.getElementById("stop").onclick = stop;
   try {{
-    var C = new (window.AudioContext || window.webkitAudioContext)();
+    C = new (window.AudioContext || window.webkitAudioContext)();
     var g = C.createGain(); g.gain.value = 1.0; g.connect(C.destination);
-    var o = C.createOscillator(); o.type = "square"; o.connect(g);
-    var t0 = C.currentTime;
-    for (var i = 0; i < 24; i++) o.frequency.setValueAtTime(i % 2 ? 660 : 990, t0 + i * 0.25);
-    o.start(t0); o.stop(t0 + 6);
+    o = C.createOscillator(); o.type = "square"; o.connect(g); o.start();
+    var hi = true;
+    timer = setInterval(function() {{ o.frequency.value = (hi = !hi) ? 990 : 660; }}, 250);
+    setTimeout(stop, 60000);
   }} catch(e) {{}}
 }})();
 </script>"""
@@ -578,7 +590,7 @@ def _alarm_html(count: int) -> str:
 
 def _play_alarm(count: int) -> None:
     import streamlit.components.v1 as components
-    components.html(_alarm_html(count), height=0)
+    components.html(_alarm_html(count), height=56)
 
 
 st.set_page_config(page_title="Blox Fruits Trade Finder", page_icon="🍈", layout="centered")
