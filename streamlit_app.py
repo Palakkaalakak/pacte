@@ -882,15 +882,16 @@ if find_clicked or auto_trigger:
             st.warning(warning)
         matches = result.matches
 
-        # Sound alarm: notify-list hits not already alarmed on in this session.
+        # Sound alarm: only for notify hits that were NOT in any earlier scan.
+        # The first scan just records a baseline so existing listings stay silent.
         reasons = {id(m): _notify_reason(m, notify_cfg) for m in matches} if notify_cfg else {}
-        notified = st.session_state.setdefault("notified_ids", set())
-        new_hits = []
-        for m in matches:
-            key = f"{m.listing.source}:{m.listing.id}"
-            if reasons.get(id(m)) and key not in notified:
-                notified.add(key)
-                new_hits.append(m)
+        seen = st.session_state.get("seen_listing_ids")
+        keys = {id(m): f"{m.listing.source}:{m.listing.id}" for m in matches}
+        new_hits = (
+            [m for m in matches if reasons.get(id(m)) and keys[id(m)] not in seen]
+            if seen is not None else []
+        )
+        st.session_state["seen_listing_ids"] = (seen or set()) | set(keys.values())
         if new_hits:
             st.error(t("notify_alert", n=len(new_hits)))
             _play_alarm(len(new_hits))
