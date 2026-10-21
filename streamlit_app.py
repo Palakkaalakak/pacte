@@ -565,6 +565,7 @@ def _alarm_html(count: int) -> str:
     the iframe re-runs it. Auto-stops after 60 s."""
     return f"""<div style="font-family:sans-serif">
 <button id="stop" style="width:100%;padding:12px;font-size:18px;font-weight:bold;background:#d32f2f;color:#fff;border:0;border-radius:8px;cursor:pointer">🔇 STOP ALARM</button>
+<div id="st" style="font-size:12px;margin-top:4px"></div>
 </div>
 <script>/* {time.time()}-{count} */
 (function(){{
@@ -578,6 +579,11 @@ def _alarm_html(count: int) -> str:
   document.getElementById("stop").onclick = stop;
   try {{
     C = new (window.AudioContext || window.webkitAudioContext)();
+    if (C.state === "suspended") C.resume();
+    setTimeout(function() {{
+      var st = document.getElementById("st");
+      st.textContent = C.state === "running" ? "🔊 playing" : "⚠️ browser blocked audio (" + C.state + ") — click this page once, then use Test alarm";
+    }}, 300);
     var g = C.createGain(); g.gain.value = 1.0; g.connect(C.destination);
     o = C.createOscillator(); o.type = "square"; o.connect(g); o.start();
     var hi = true;
@@ -590,7 +596,7 @@ def _alarm_html(count: int) -> str:
 
 def _play_alarm(count: int) -> None:
     import streamlit.components.v1 as components
-    components.html(_alarm_html(count), height=56)
+    components.html(_alarm_html(count), height=80)
 
 
 st.set_page_config(page_title="Blox Fruits Trade Finder", page_icon="🍈", layout="centered")
@@ -810,6 +816,15 @@ find_clicked = st.button(t("find_trades"), type="primary", use_container_width=T
 live_mode = st.toggle(t("live_toggle"), value=False, key="live_mode")
 if notify_cfg and st.button(t("notify_test")):
     _play_alarm(0)
+with st.expander("🛠 Debug: delayed alarm"):
+    _dbg_delay = st.number_input("Play alarm after (seconds)", 1, 300, 15)
+    if st.button("▶️ Start delayed alarm test"):
+        _ph = st.empty()
+        for _left in range(int(_dbg_delay), 0, -1):
+            _ph.info(f"Alarm in {_left}s — switch to another tab now")
+            time.sleep(1)
+        _ph.empty()
+        _play_alarm(1)
 
 # Live mode: auto-trigger a scan once the interval has elapsed since the last one.
 _last_scan = st.session_state.get("last_scan_ts")
