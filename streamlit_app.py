@@ -939,6 +939,9 @@ if find_clicked or auto_trigger:
             if seen is not None else []
         )
         st.session_state["seen_listing_ids"] = (seen or set()) | set(keys.values())
+        # Live mode: after the baseline scan, list only trades not seen before.
+        if live_mode and seen is not None:
+            matches = [m for m in matches if keys[id(m)] not in seen]
         if new_hits:
             st.error(t("notify_alert", n=len(new_hits)))
             _play_alarm(len(new_hits))
