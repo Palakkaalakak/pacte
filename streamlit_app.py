@@ -705,9 +705,9 @@ if goals_mode == t("mode_saved"):
             st.write(f"- {line}")
 else:
     show_any = st.checkbox(t("show_any"), value=False)
-    min_profit_millions = st.slider(t("min_profit"), 0, 200, 0, step=5, disabled=show_any)
-    min_profit_pct = st.slider(
-        t("min_profit_pct"), 0, 200, 0, step=5,
+    min_profit_millions = st.number_input(t("min_profit"), 0, 1000000, 0, step=5, disabled=show_any)
+    min_profit_pct = st.number_input(
+        t("min_profit_pct"), 0, 1000000, 0, step=5,
         help=t("min_profit_pct_help"),
         disabled=show_any,
     )
@@ -726,9 +726,9 @@ else:
             disabled=show_any,
         )
         value_basis = next(k for k, v in VALUE_BASIS_LABELS.items() if v == value_basis_label)
-        min_get_value_millions = st.slider(t("min_get_value"), 0, 500, 0, step=5, disabled=show_any)
-        max_give_value_millions = st.slider(
-            t("max_give_value"), 0, 500, 0, step=5,
+        min_get_value_millions = st.number_input(t("min_get_value"), 0, 1000000, 0, step=5, disabled=show_any)
+        max_give_value_millions = st.number_input(
+            t("max_give_value"), 0, 1000000, 0, step=5,
             help=t("max_give_value_help"),
             disabled=show_any,
         )
@@ -780,7 +780,7 @@ elif notify_mode == t("notify_mode_mine"):
         notify_cfg = _load_json(_mine[st.selectbox(t("notify_saved"), list(_mine.keys()))])
 elif notify_mode == t("notify_mode_build"):
     _n_items = st.multiselect(t("notify_items"), _catalog_names())
-    _n_min = st.slider(t("notify_min_value"), 0, 500, 0, step=5)
+    _n_min = st.number_input(t("notify_min_value"), 0, 1000000, 0, step=5)
     notify_cfg = {"items": _n_items, "min_profit": _n_min * 1_000_000}
     _n_name = st.text_input(t("notify_save_name"))
     if st.button(t("notify_save_btn"), use_container_width=True) and _n_name.strip() and (_n_items or _n_min):
@@ -803,8 +803,8 @@ with st.expander("🛡️ Scam / fake filter"):
         "(get ÷ give − 100%): giving a 10M item for 20M of items is +100%. Applies to the table, "
         "the live checker, its alarm and chain trades. 0 = off."
     )
-    _sc_pct = st.number_input("Exclude profit above (% of what you give)", 0, 100000, 0, step=25, key="scam_pct")
-    _sc_abs = st.number_input("Exclude profit above (millions)", 0, 100000, 0, step=5, key="scam_abs")
+    _sc_pct = st.number_input("Exclude profit above (% of what you give)", 0, 1000000, 0, step=25, key="scam_pct")
+    _sc_abs = st.number_input("Exclude profit above (millions)", 0, 1000000, 0, step=5, key="scam_abs")
 scam_cfg = {
     "max_profit_pct": _sc_pct / 100 if _sc_pct else None,
     "max_profit": _sc_abs * 1_000_000 if _sc_abs else None,
@@ -1036,7 +1036,7 @@ with st.expander(t("chain_header"), expanded=False):
     chain_max_age = st.number_input(t("chain_max_age"), 1, 1440, 5, key="chain_max_age")
     chain_unlimited = st.checkbox("♾️ Unlimited steps", value=False, key="chain_unlimited")
     chain_max_steps = st.slider(t("chain_max_steps"), 2, 10, 3, key="chain_max_steps", disabled=chain_unlimited)
-    chain_min_profit = st.slider(t("chain_min_profit"), 0, 200, 0, step=1, key="chain_min_profit")
+    chain_min_profit = st.number_input(t("chain_min_profit"), 0, 1000000, 0, step=1, key="chain_min_profit")
     st.checkbox(
         "🔁 Also search chains on every live scan (runs alongside the live checker)",
         value=False, key="chain_auto",
@@ -1189,23 +1189,23 @@ with st.expander(t("watcher_header")):
             col_p1, col_p2 = st.columns(2)
             with col_p1:
                 r_min_profit_m = st.number_input(
-                    t("rule_min_profit"), min_value=0, max_value=10_000,
+                    t("rule_min_profit"), min_value=0, max_value=1_000_000,
                     value=int((raw_rule.get("min_profit") or 0) / 1_000_000),
                     step=5, key=f"rule_minprofit_{uid}",
                 )
                 r_min_get_m = st.number_input(
-                    t("rule_min_get_value"), min_value=0, max_value=10_000,
+                    t("rule_min_get_value"), min_value=0, max_value=1_000_000,
                     value=int((raw_rule.get("min_get_value") or 0) / 1_000_000),
                     step=5, key=f"rule_minget_{uid}",
                 )
             with col_p2:
                 r_min_pct = st.number_input(
-                    t("rule_min_profit_pct"), min_value=0, max_value=1000,
+                    t("rule_min_profit_pct"), min_value=0, max_value=1_000_000,
                     value=int(round((raw_rule.get("min_profit_pct") or 0) * 100)),
                     step=5, key=f"rule_minpct_{uid}",
                 )
                 r_max_give_m = st.number_input(
-                    t("rule_max_give_value"), min_value=0, max_value=10_000,
+                    t("rule_max_give_value"), min_value=0, max_value=1_000_000,
                     value=int((raw_rule.get("max_give_value") or 0) / 1_000_000),
                     step=5, key=f"rule_maxgive_{uid}",
                 )
