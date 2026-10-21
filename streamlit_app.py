@@ -165,8 +165,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "header_notify": {"en": "3. Wanted - Notify (loud sound)", "it": "3. Cercati - Notifica (suono forte)"},
     "notify_intro": {
-        "en": "A loud alarm plays in your browser when a trade gives you one of these items OR is worth at least the minimum value.",
-        "it": "Nel browser suona un allarme forte quando uno scambio ti dà uno di questi oggetti OPPURE vale almeno il valore minimo.",
+        "en": "A loud alarm plays in your browser when a trade gives you one of these items OR gives at least the minimum profit.",
+        "it": "Nel browser suona un allarme forte quando uno scambio ti dà uno di questi oggetti OPPURE ha almeno il profitto minimo.",
     },
     "notify_off": {"en": "No notifications", "it": "Nessuna notifica"},
     "notify_mode_saved": {"en": "Use a saved setup", "it": "Usa una configurazione salvata"},
@@ -174,13 +174,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "notify_mode_build": {"en": "Build my own", "it": "Crea la tua"},
     "notify_saved": {"en": "Saved notify list", "it": "Lista di notifica salvata"},
     "notify_items": {"en": "Notify me when a trade gives one of these", "it": "Avvisami quando uno scambio dà uno di questi"},
-    "notify_min_value": {"en": "...or when it is worth at least (millions, 0 = off)", "it": "...o quando vale almeno (milioni, 0 = off)"},
+    "notify_min_value": {"en": "...or when it is a profit of at least (millions, 0 = off)", "it": "...o quando il profitto è almeno (milioni, 0 = off)"},
     "notify_save_name": {"en": "Name to save this list as", "it": "Nome con cui salvare questa lista"},
     "notify_save_btn": {"en": "💾 Save notify list", "it": "💾 Salva lista di notifica"},
     "notify_saved_ok": {"en": "Saved \"{name}\"!", "it": "Salvato \"{name}\"!"},
     "notify_summary": {
-        "en": "Alarm if a trade gives: {items} | or is worth {value}+",
-        "it": "Allarme se uno scambio dà: {items} | o vale {value}+",
+        "en": "Alarm if a trade gives: {items} | or has {value}+ profit",
+        "it": "Allarme se uno scambio dà: {items} | o ha {value}+ di profitto",
     },
     "notify_no_saved": {"en": "No saved notify lists yet.", "it": "Nessuna lista di notifica salvata."},
     "live_toggle": {
@@ -554,9 +554,11 @@ def _notify_reason(match, cfg: dict) -> str | None:
         words = _name_words(item.name)
         if any(w <= words for w in wanted):
             return item.name
-    min_value = cfg.get("min_get_value") or 0
-    if min_value and match.get_value >= min_value:
-        return format_value(match.get_value)
+    # Threshold is PROFIT (received - given), not the raw value received, so a
+    # fair 10M-for-10M swap doesn't count. "min_get_value" = legacy saved lists.
+    min_value = cfg.get("min_profit") or cfg.get("min_get_value") or 0
+    if min_value and match.delta >= min_value:
+        return "+" + format_value(match.delta)
     return None
 
 
@@ -787,7 +789,7 @@ elif notify_mode == t("notify_mode_mine"):
 elif notify_mode == t("notify_mode_build"):
     _n_items = st.multiselect(t("notify_items"), _catalog_names())
     _n_min = st.slider(t("notify_min_value"), 0, 500, 0, step=5)
-    notify_cfg = {"items": _n_items, "min_get_value": _n_min * 1_000_000}
+    notify_cfg = {"items": _n_items, "min_profit": _n_min * 1_000_000}
     _n_name = st.text_input(t("notify_save_name"))
     if st.button(t("notify_save_btn"), use_container_width=True) and _n_name.strip() and (_n_items or _n_min):
         USER_NOTIFY_DIR.mkdir(parents=True, exist_ok=True)
@@ -799,7 +801,7 @@ if notify_cfg:
     st.caption(t(
         "notify_summary",
         items=", ".join(notify_cfg.get("items", [])) or "—",
-        value=format_value(notify_cfg.get("min_get_value") or 0),
+        value=format_value(notify_cfg.get("min_profit") or notify_cfg.get("min_get_value") or 0),
     ))
 
 # ------------------------------------------------------------------ sources
