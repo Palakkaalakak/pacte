@@ -32,3 +32,17 @@ def test_is_scam_pct_and_abs() -> None:
     assert not is_scam(10, 0.9, {"max_profit_pct": 1.0})
     assert is_scam(30_000_000, 0.1, {"max_profit": 20_000_000})
     assert not is_scam(30_000_000, 5.0, {})
+
+
+def test_blocked_placeholder_items() -> None:
+    from datetime import timedelta
+    from blox_trade_finder.live import filter_listings
+    from blox_trade_finder.models import CatalogItem, Listing
+    mk = lambda n: CatalogItem(id=1, name=n)
+    base = dict(source="g", url="u", poster_name="p", poster_rating=1.0, wfl={}, created_at=datetime.now(timezone.utc))
+    ok = Listing(id="1", give=[mk("Venom")], want=[mk("Pain")], **base)
+    bad = Listing(id="2", give=[mk("Venom"), mk("Or")], want=[mk("Pain")], **base)
+    bad2 = Listing(id="3", give=[mk("Venom")], want=[mk("Upgrade")], **base)
+    cfg = {"blocked_items": ["or", "Upgrade"]}
+    assert filter_listings([ok, bad, bad2], cfg) == [ok]
+    assert filter_listings([ok, bad, bad2], None) == [ok, bad, bad2]

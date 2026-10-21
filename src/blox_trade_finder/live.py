@@ -58,6 +58,20 @@ def is_scam(delta: int, profit_pct: float, cfg: dict | None) -> bool:
     return bool((max_pct and profit_pct > max_pct) or (max_abs and delta > max_abs))
 
 
+DEFAULT_BLOCKED_ITEMS = ("or", "add", "any", "upgrade", "downgrade")
+
+
+def has_blocked_item(listing, cfg: dict | None) -> bool:
+    """True if either side contains a placeholder like "Or"/"Upgrade"/"Any" —
+    those listings aren't a definite, executable trade."""
+    blocked = {b.strip().lower() for b in (cfg or {}).get("blocked_items", []) if b.strip()}
+    return bool(blocked) and any(i.name.strip().lower() in blocked for i in (*listing.give, *listing.want))
+
+
+def filter_listings(listings: list, cfg: dict | None) -> list:
+    return [l for l in listings if not has_blocked_item(l, cfg)]
+
+
 def filter_chains(chains: list, cfg: dict | None) -> list:
     return [c for c in chains if not is_scam(c.profit, c.profit_pct, cfg)]
 
@@ -77,7 +91,10 @@ def build_view(
         matches = [m for m in matches if (now - _aware(m.listing.created_at)).total_seconds() <= cut]
     excluded = 0
     if scam_cfg:
-        kept = [m for m in matches if not is_scam(m.delta, m.profit_pct, scam_cfg)]
+        kept = [
+            m for m in matches
+            if not is_scam(m.delta, m.profit_pct, scam_cfg) and not has_blocked_item(m.listing, scam_cfg)
+        ]
         excluded, matches = len(matches) - len(kept), kept
     reasons = {id(m): notify_reason(m, notify_cfg) for m in matches} if notify_cfg else {}
     keys = {id(m): f"{m.listing.source}:{m.listing.id}" for m in matches}
@@ -173,7 +190,7 @@ class LiveWorker:
             chains = None
             if self.chain_cfg is not None:
                 chains = filter_chains(
-                    find_chains(result.listings, inventory_counts(self.inventory), **self.chain_cfg), self.scam_cfg
+                    find_chains(filter_listings(result.listings, self.scam_cfg), inventory_counts(self.inventory), **self.chain_cfg), self.scam_cfg
                 )
             with self._lock:
                 self.state.update(

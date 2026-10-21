@@ -30,7 +30,7 @@ import pandas as pd
 import streamlit as st
 
 from blox_trade_finder.models import Goals, Inventory, InventoryEntry
-from blox_trade_finder.live import NOTIFY_MAX_AGE_MINUTES, LiveWorker, build_view, filter_chains
+from blox_trade_finder.live import NOTIFY_MAX_AGE_MINUTES, LiveWorker, DEFAULT_BLOCKED_ITEMS, build_view, filter_chains, filter_listings
 from blox_trade_finder.scan import ScanProgress, run_scan
 from blox_trade_finder.sources.gamersberg import GamersbergSource
 from blox_trade_finder.ui.table import format_value
@@ -833,7 +833,13 @@ with st.expander("🛡️ Scam / fake filter"):
     )
     _sc_pct = st.number_input("Exclude profit above (% of what you give)", 0, None, 0, step=25, key="scam_pct")
     _sc_abs = money_input("Exclude profit above (millions)", key="scam_abs")
+    _sc_blocked = st.text_input(
+        "Exclude trades containing these items (uncertain / placeholder entries)",
+        value=", ".join(w.title() for w in DEFAULT_BLOCKED_ITEMS), key="scam_blocked",
+        help="Comma-separated item names. Trades with 'Or', 'Upgrade', 'Any'… aren't definite trades.",
+    )
 scam_cfg = {
+    "blocked_items": [w.strip() for w in _sc_blocked.split(",") if w.strip()],
     "max_profit_pct": _sc_pct / 100 if _sc_pct else None,
     "max_profit": _sc_abs * 1_000_000 if _sc_abs else None,
 }
@@ -921,7 +927,7 @@ def _run_chains(listings: list) -> None:
     from blox_trade_finder.core.chains import find_chains
     from blox_trade_finder.core.normalize import inventory_counts
     st.session_state["chain_view"] = filter_chains(
-        find_chains(listings, inventory_counts(inventory), **_chain_cfg()), scam_cfg
+        find_chains(filter_listings(listings, scam_cfg), inventory_counts(inventory), **_chain_cfg()), scam_cfg
     )
     st.session_state["chain_view_ts"] = time.time()
 
@@ -1007,7 +1013,7 @@ def _render_view(view: dict) -> None:
         st.error(t("notify_alert", n=view["new_hits"]))
     st.success(t("found_matches", count=view["count"]))
     if view.get("excluded"):
-        st.caption(f"🛡️ {view['excluded']} suspiciously profitable trade(s) hidden by the scam filter")
+        st.caption(f"🛡️ {view['excluded']} suspicious/uncertain trade(s) hidden by the scam filter")
     if not view["rows"]:
         st.info(t("no_matches"))
         return
