@@ -884,7 +884,7 @@ def _chain_cfg() -> dict:
         value_basis=goals.value_basis,
         max_age_minutes=ss.get("chain_max_age", 5),
         max_steps=None if ss.get("chain_unlimited") else ss.get("chain_max_steps", 3),
-        min_profit=ss.get("chain_min_profit", 0) * 1_000_000,
+        min_profit=(_parse_millions(str(ss.get("chain_min_profit", "0"))) or 0) * 1_000_000,
         target_names=targets,
     )
 
