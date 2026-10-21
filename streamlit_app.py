@@ -820,6 +820,10 @@ selected_sources = SOURCE_CHOICES[source_label]
 
 # ------------------------------------------------------------------- action
 find_clicked = st.button(t("find_trades"), type="primary", use_container_width=True)
+st.checkbox(
+    f"Only show trades posted in the last {NOTIFY_MAX_AGE_MINUTES} minutes",
+    value=True, key="recent_only",
+)
 live_mode = st.toggle(t("live_toggle"), value=False, key="live_mode")
 if notify_cfg and st.button(t("notify_test")):
     _play_alarm(0)
@@ -915,6 +919,15 @@ if find_clicked or auto_trigger:
         for warning in result.name_warnings:
             st.warning(warning)
         matches = result.matches
+        if st.session_state.get("recent_only", True):
+            _cut = NOTIFY_MAX_AGE_MINUTES * 60
+            matches = [
+                m for m in matches
+                if (datetime.now(timezone.utc) - (
+                    m.listing.created_at if m.listing.created_at.tzinfo
+                    else m.listing.created_at.replace(tzinfo=timezone.utc)
+                )).total_seconds() <= _cut
+            ]
 
         # Sound alarm: only for notify hits that were NOT in any earlier scan.
         # The first scan just records a baseline so existing listings stay silent.
@@ -933,10 +946,12 @@ if find_clicked or auto_trigger:
         st.success(t("found_matches", count=len(matches)))
 
         if matches:
+            new_ids = {id(m) for m in new_hits}
+            matches = sorted(matches, key=lambda m: id(m) not in new_ids)  # new hits on top
             rows = []
             for m in matches:
                 rows.append({
-                    t("col_notify"): "🔔 " + reasons[id(m)] if reasons.get(id(m)) else "",
+                    t("col_notify"): ("🆕🔔 " if id(m) in new_ids else "🔔 ") + reasons[id(m)] if reasons.get(id(m)) else "",
                     t("col_source"): m.listing.source,
                     t("col_you_give"): ", ".join(i.name for i in m.listing.want),
                     t("col_you_get"): ", ".join(i.name for i in m.listing.give),
@@ -949,8 +964,14 @@ if find_clicked or auto_trigger:
                     t("col_link"): m.listing.url,
                 })
             df = pd.DataFrame(rows)
+            _flags = [id(m) in new_ids for m in matches]
+            styled = df.style.apply(
+                lambda r: ["background-color: #1faa59; color: white; font-weight: bold"] * len(r)
+                if _flags[r.name] else [""] * len(r),
+                axis=1,
+            )
             st.dataframe(
-                df,
+                styled,
                 use_container_width=True,
                 hide_index=True,
                 column_config={t("col_link"): st.column_config.LinkColumn(t("col_link"))},
