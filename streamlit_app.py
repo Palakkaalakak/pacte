@@ -48,6 +48,7 @@ NOTIFY_PRESETS = {
     "Cscgde's": PRESETS_DIR / "green_lightning_notify.json",
 }
 LIVE_SCAN_INTERVAL_SECONDS = 5 * 60
+NOTIFY_MAX_AGE_MINUTES = 10  # alarm only for listings this young
 GOALS_PRESETS = {
     "Palakkaalakak's": PRESETS_DIR / "creation_goals.json",
     "Cscgde's": PRESETS_DIR / "green_lightning_goals.json",
@@ -541,7 +542,13 @@ def _name_words(name: str) -> frozenset[str]:
 
 
 def _notify_reason(match, cfg: dict) -> str | None:
-    """Why `match` should sound the alarm (OR semantics), or None."""
+    """Why `match` should sound the alarm (OR semantics), or None.
+    Only listings posted within NOTIFY_MAX_AGE_MINUTES qualify."""
+    posted = match.listing.created_at
+    if posted.tzinfo is None:
+        posted = posted.replace(tzinfo=timezone.utc)
+    if (datetime.now(timezone.utc) - posted).total_seconds() > NOTIFY_MAX_AGE_MINUTES * 60:
+        return None
     wanted = [_name_words(n) for n in cfg.get("items", []) if _name_words(n)]
     for item in match.listing.give:
         words = _name_words(item.name)
