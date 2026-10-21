@@ -30,6 +30,7 @@ import pandas as pd
 import streamlit as st
 
 from blox_trade_finder.models import Goals, Inventory, InventoryEntry
+from blox_trade_finder.live import NOTIFY_MAX_AGE_MINUTES, LiveWorker, build_view, filter_chains
 from blox_trade_finder.scan import ScanProgress, run_scan
 from blox_trade_finder.sources.gamersberg import GamersbergSource
 from blox_trade_finder.ui.table import format_value
@@ -48,7 +49,9 @@ NOTIFY_PRESETS = {
     "Cscgde's": PRESETS_DIR / "green_lightning_notify.json",
 }
 LIVE_SCAN_INTERVAL_SECONDS = 5 * 60
-NOTIFY_MAX_AGE_MINUTES = 10  # alarm only for listings this young
+# Interactive scans page the Gamersberg feed at ~1 req/s; cap pages so a first scan
+# on a fresh server finishes in ~2 minutes instead of the 24/7 watcher's full budget.
+INTERACTIVE_GB_MAX_PAGES = 120
 GOALS_PRESETS = {
     "Palakkaalakak's": PRESETS_DIR / "creation_goals.json",
     "Cscgde's": PRESETS_DIR / "green_lightning_goals.json",
@@ -551,31 +554,6 @@ def _goals_preview_lines(goals: Goals) -> list[str]:
 
 
 # ------------------------------------------------------------------- notify
-def _name_words(name: str) -> frozenset[str]:
-    return frozenset(w for w in re.split(r"[^a-z0-9]+", name.lower()) if w and w != "permanent")
-
-
-def _notify_reason(match, cfg: dict) -> str | None:
-    """Why `match` should sound the alarm (OR semantics), or None.
-    Only listings posted within NOTIFY_MAX_AGE_MINUTES qualify."""
-    posted = match.listing.created_at
-    if posted.tzinfo is None:
-        posted = posted.replace(tzinfo=timezone.utc)
-    if (datetime.now(timezone.utc) - posted).total_seconds() > NOTIFY_MAX_AGE_MINUTES * 60:
-        return None
-    wanted = [_name_words(n) for n in cfg.get("items", []) if _name_words(n)]
-    for item in match.listing.give:
-        words = _name_words(item.name)
-        if any(w <= words for w in wanted):
-            return item.name
-    # Threshold is PROFIT (received - given), not the raw value received, so a
-    # fair 10M-for-10M swap doesn't count. "min_get_value" = legacy saved lists.
-    min_value = cfg.get("min_profit") or cfg.get("min_get_value") or 0
-    if min_value and match.delta >= min_value:
-        return "+" + format_value(match.delta)
-    return None
-
-
 def _list_user_notify() -> dict[str, Path]:
     if not USER_NOTIFY_DIR.exists():
         return {}
@@ -818,6 +796,20 @@ if notify_cfg:
         value=format_value(notify_cfg.get("min_profit") or notify_cfg.get("min_get_value") or 0),
     ))
 
+# --------------------------------------------------------------- scam filter
+with st.expander("🛡️ Scam / fake filter"):
+    st.caption(
+        "Hide trades that look too good to be true. Profit % is measured against what YOU give "
+        "(get ÷ give − 100%): giving a 10M item for 20M of items is +100%. Applies to the table, "
+        "the live checker, its alarm and chain trades. 0 = off."
+    )
+    _sc_pct = st.number_input("Exclude profit above (% of what you give)", 0, 100000, 0, step=25, key="scam_pct")
+    _sc_abs = st.number_input("Exclude profit above (millions)", 0, 100000, 0, step=5, key="scam_abs")
+scam_cfg = {
+    "max_profit_pct": _sc_pct / 100 if _sc_pct else None,
+    "max_profit": _sc_abs * 1_000_000 if _sc_abs else None,
+}
+
 # ------------------------------------------------------------------ sources
 st.header(t("header_sources"))
 SOURCE_CHOICES = {
@@ -853,39 +845,60 @@ with st.expander("🛠 Debug: delayed alarm"):
         _ph.empty()
         _play_alarm(1)
 
-# Live mode: auto-trigger a scan once the interval has elapsed since the last one.
-_last_scan = st.session_state.get("last_scan_ts")
-auto_trigger = bool(
-    live_mode and (_last_scan is None or time.time() - _last_scan >= LIVE_SCAN_INTERVAL_SECONDS)
-)
-
-# Interactive scans page the Gamersberg feed at ~1 request/second. Cap the
-# page count so a first-ever scan on a fresh server (e.g. Streamlit Cloud,
-# where nothing is cached yet) finishes in ~2 minutes instead of grinding
-# through the full 400-page deep-scan budget the 24/7 watcher uses.
-INTERACTIVE_GB_MAX_PAGES = 120
-
-def _run_chains(listings: list) -> None:
-    """Search chains over `listings` using the chain-section settings and store
-    the result in session state (rendered independently of the live checker)."""
-    from blox_trade_finder.core.chains import find_chains
-    from blox_trade_finder.core.normalize import inventory_counts
+# Live checker runs in a background thread (see live.py) so manual scans and
+# chain searches never interrupt it. Settings are re-synced on every rerun.
+def _chain_cfg() -> dict:
     ss = st.session_state
     targets: set[str] = set()
     if goals.want_item:
         targets = {goals.want_item} if isinstance(goals.want_item, str) else set(goals.want_item)
-    ss["chain_view"] = find_chains(
-        listings, inventory_counts(inventory),
+    return dict(
         value_basis=goals.value_basis,
         max_age_minutes=ss.get("chain_max_age", 5),
         max_steps=None if ss.get("chain_unlimited") else ss.get("chain_max_steps", 3),
         min_profit=ss.get("chain_min_profit", 0) * 1_000_000,
         target_names=targets,
     )
-    ss["chain_view_ts"] = time.time()
 
 
-if find_clicked or auto_trigger:
+worker: LiveWorker | None = st.session_state.get("live_worker")
+if live_mode and inventory.items:
+    if worker is None or not worker.alive:
+        worker = LiveWorker(
+            inventory=inventory, goals=goals, sources=selected_sources, notify_cfg=notify_cfg,
+            recent_only=st.session_state.get("recent_only", True), scam_cfg=scam_cfg,
+            chain_cfg=_chain_cfg() if st.session_state.get("chain_auto") else None,
+            interval_seconds=LIVE_SCAN_INTERVAL_SECONDS, gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
+        )
+        worker.start()
+        st.session_state["live_worker"] = worker
+        st.session_state["alarm_seq_played"] = 0
+    else:  # push current settings into the running checker
+        worker.inventory, worker.goals, worker.sources = inventory, goals, selected_sources
+        worker.notify_cfg, worker.scam_cfg = notify_cfg, scam_cfg
+        worker.recent_only = st.session_state.get("recent_only", True)
+        worker.chain_cfg = _chain_cfg() if st.session_state.get("chain_auto") else None
+elif worker is not None:
+    worker.stop()
+    st.session_state.pop("live_worker", None)
+    worker = None
+
+# Interactive scans page the Gamersberg feed at ~1 request/second. Cap the
+# page count so a first-ever scan on a fresh server (e.g. Streamlit Cloud,
+# where nothing is cached yet) finishes in ~2 minutes instead of grinding
+# through the full 400-page deep-scan budget the 24/7 watcher uses.
+
+def _run_chains(listings: list) -> None:
+    """Manual chain search; stored in session state, shown by the chain fragment."""
+    from blox_trade_finder.core.chains import find_chains
+    from blox_trade_finder.core.normalize import inventory_counts
+    st.session_state["chain_view"] = filter_chains(
+        find_chains(listings, inventory_counts(inventory), **_chain_cfg()), scam_cfg
+    )
+    st.session_state["chain_view_ts"] = time.time()
+
+
+if find_clicked:
     if not inventory.items:
         st.warning(t("need_item_warning"))
         st.stop()
@@ -946,91 +959,76 @@ if find_clicked or auto_trigger:
         with st.expander(t("scan_failed_details")):
             st.code(traceback.format_exc())
         result = None
-        st.session_state["last_scan_ts"] = time.time()
     if result is not None:
-        st.session_state["last_scan_ts"] = time.time()
         progress.progress(100, text=t("progress_done"))
         progress.empty()
-
         st.session_state["last_listings"] = (time.time(), result.listings)
-        matches = result.matches
-        if st.session_state.get("recent_only", True):
-            _cut = NOTIFY_MAX_AGE_MINUTES * 60
-            matches = [
-                m for m in matches
-                if (datetime.now(timezone.utc) - (
-                    m.listing.created_at if m.listing.created_at.tzinfo
-                    else m.listing.created_at.replace(tzinfo=timezone.utc)
-                )).total_seconds() <= _cut
-            ]
-
-        # Sound alarm: only for notify hits that were NOT in any earlier scan.
-        # The first scan just records a baseline so existing listings stay silent.
-        reasons = {id(m): _notify_reason(m, notify_cfg) for m in matches} if notify_cfg else {}
-        seen = st.session_state.get("seen_listing_ids")
-        keys = {id(m): f"{m.listing.source}:{m.listing.id}" for m in matches}
-        new_hits = (
-            [m for m in matches if reasons.get(id(m)) and keys[id(m)] not in seen]
-            if seen is not None else []
+        view, st.session_state["seen_listing_ids"] = build_view(
+            result, notify_cfg, recent_only=st.session_state.get("recent_only", True),
+            only_new=False, seen=st.session_state.get("seen_listing_ids"), scam_cfg=scam_cfg,
         )
-        st.session_state["seen_listing_ids"] = (seen or set()) | set(keys.values())
-        # Live mode: after the baseline scan, list only trades not seen before.
-        if live_mode and seen is not None:
-            matches = [m for m in matches if keys[id(m)] not in seen]
-        if new_hits:
-            _play_alarm(len(new_hits))
-
-        view = {"warnings": result.name_warnings, "count": len(matches),
-                "new_hits": len(new_hits), "df": None, "flags": []}
-        if matches:
-            new_ids = {id(m) for m in new_hits}
-            matches = sorted(matches, key=lambda m: id(m) not in new_ids)  # new hits on top
-            rows = []
-            for m in matches:
-                rows.append({
-                    t("col_notify"): ("🆕🔔 " if id(m) in new_ids else "🔔 ") + reasons[id(m)] if reasons.get(id(m)) else "",
-                    t("col_source"): m.listing.source,
-                    t("col_you_give"): ", ".join(i.name for i in m.listing.want),
-                    t("col_you_get"): ", ".join(i.name for i in m.listing.give),
-                    t("col_profit"): format_value(m.delta),
-                    t("col_profit_pct"): f"{m.profit_pct:+.0%}",
-                    t("col_demand"): m.demand,
-                    t("col_verdict"): m.verdict.upper(),
-                    t("col_confidence"): f"{m.confidence}%",
-                    t("col_posted"): _posted_ago(m.listing.created_at),
-                    t("col_link"): m.listing.url,
-                })
-            view["df"] = pd.DataFrame(rows)
-            view["flags"] = [id(m) in new_ids for m in matches]
         st.session_state["last_view"] = view
+        if view["new_hits"]:
+            _play_alarm(view["new_hits"])
 
-        # Chain search rides on the same fetched listings — no second scan.
-        if st.session_state.get("chain_auto"):
-            _run_chains(result.listings)
-
-# Render the latest results on EVERY run (scan, chain click, widget change…) so
-# the live checker's table and chain results coexist and neither wipes the other.
-_view = st.session_state.get("last_view")
-if _view:
-    for _w in _view["warnings"]:
-        st.warning(_w)
-    if _view["new_hits"]:
-        st.error(t("notify_alert", n=_view["new_hits"]))
-    st.success(t("found_matches", count=_view["count"]))
-    if _view["df"] is not None:
-        _flags = _view["flags"]
-        st.dataframe(
-            _view["df"].style.apply(
-                lambda r: ["background-color: #1faa59; color: white; font-weight: bold"] * len(r)
-                if _flags[r.name] else [""] * len(r),
-                axis=1,
-            ),
-            use_container_width=True,
-            hide_index=True,
-            column_config={t("col_link"): st.column_config.LinkColumn(t("col_link"))},
-        )
-    else:
+# ------------------------------------------------------------ results panels
+def _render_view(view: dict) -> None:
+    for w in view["warnings"]:
+        st.warning(w)
+    if view["new_hits"]:
+        st.error(t("notify_alert", n=view["new_hits"]))
+    st.success(t("found_matches", count=view["count"]))
+    if view.get("excluded"):
+        st.caption(f"🛡️ {view['excluded']} suspiciously profitable trade(s) hidden by the scam filter")
+    if not view["rows"]:
         st.info(t("no_matches"))
+        return
+    df = pd.DataFrame([{
+        t("col_notify"): r["notify"], t("col_source"): r["source"],
+        t("col_you_give"): r["give"], t("col_you_get"): r["get"],
+        t("col_profit"): r["delta"], t("col_profit_pct"): r["pct"],
+        t("col_demand"): r["demand"], t("col_verdict"): r["verdict"],
+        t("col_confidence"): r["conf"], t("col_posted"): _posted_ago(r["posted"]),
+        t("col_link"): r["url"],
+    } for r in view["rows"]])
+    flags = [r["is_new"] for r in view["rows"]]
+    st.dataframe(
+        df.style.apply(
+            lambda row: ["background-color: #1faa59; color: white; font-weight: bold"] * len(row)
+            if flags[row.name] else [""] * len(row),
+            axis=1,
+        ),
+        use_container_width=True, hide_index=True,
+        column_config={t("col_link"): st.column_config.LinkColumn(t("col_link"))},
+    )
+
+
+def _live_panel() -> None:
+    """Polls the background checker; the latest of {manual, live} view is shown."""
+    ss = st.session_state
+    snap = worker.snapshot() if worker is not None else None
+    if snap is not None:
+        if snap["scanning"]:
+            st.caption("🔄 Live checker: scanning…")
+        elif snap["last_scan_ts"]:
+            left = max(0, int(LIVE_SCAN_INTERVAL_SECONDS - (time.time() - snap["last_scan_ts"])))
+            st.caption(f"🟢 Live checker running — scan #{snap['scans']}, next in {left}s")
+        if snap["error"]:
+            st.error(t("scan_failed", error=snap["error"]))
+        if snap["alarm_seq"] > ss.get("alarm_seq_played", 0):
+            ss["alarm_seq_played"] = snap["alarm_seq"]
+            ss["alarm_html"] = _alarm_html(snap["alarm_hits"])
+            ss["alarm_until"] = time.time() + 60
+    # Same html every poll => the iframe is kept (not reloaded), so the siren plays on.
+    if time.time() < ss.get("alarm_until", 0):
+        import streamlit.components.v1 as components
+        components.html(ss["alarm_html"], height=80)
+    candidates = [v for v in (ss.get("last_view"), snap["view"] if snap else None) if v]
+    if candidates:
+        _render_view(max(candidates, key=lambda v: v["ts"]))
+
+
+st.fragment(run_every=3 if worker is not None else None)(_live_panel)()
 
 # ------------------------------------------------------------------- chains
 with st.expander(t("chain_header"), expanded=False):
@@ -1048,7 +1046,7 @@ with st.expander(t("chain_header"), expanded=False):
             st.warning(t("need_item_warning"))
         else:
             try:
-                cached = st.session_state.get("last_listings")
+                cached = (worker.snapshot()["listings"] if worker is not None else None) or st.session_state.get("last_listings")
                 if cached and time.time() - cached[0] < LIVE_SCAN_INTERVAL_SECONDS:
                     _run_chains(cached[1])  # reuse the live checker's fresh fetch
                 else:
@@ -1061,27 +1059,34 @@ with st.expander(t("chain_header"), expanded=False):
                     _run_chains(_cres.listings)
             except Exception as exc:
                 st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
-    chains = st.session_state.get("chain_view")
-    if chains is not None:
+    def _chain_panel() -> None:
+        ss = st.session_state
+        snap = worker.snapshot() if worker is not None else None
+        use_live = snap and snap["chains"] is not None and snap["chains_ts"] >= ss.get("chain_view_ts", 0)
+        chains = snap["chains"] if use_live else ss.get("chain_view")
+        if chains is None:
+            return
         st.success(t("chain_found", n=len(chains)))
         if not chains:
             st.info(t("chain_none"))
-        else:
-            st.dataframe(
-                pd.DataFrame([{
-                    "Chain": " → ".join(c.items),
-                    "Steps": len(c.steps),
-                    t("col_profit"): format_value(c.profit),
-                    t("col_profit_pct"): f"{c.profit_pct:+.0%}",
-                    "Oldest step": f"{c.oldest_minutes:.0f}m",
-                } for c in chains[:200]]),
-                use_container_width=True, hide_index=True,
+            return
+        st.dataframe(
+            pd.DataFrame([{
+                "Chain": " → ".join(c.items),
+                "Steps": len(c.steps),
+                t("col_profit"): format_value(c.profit),
+                t("col_profit_pct"): f"{c.profit_pct:+.0%}",
+                "Oldest step": f"{c.oldest_minutes:.0f}m",
+            } for c in chains[:200]]),
+            use_container_width=True, hide_index=True,
+        )
+        for c in chains[:25]:
+            st.markdown(
+                f"**{' → '.join(c.items)}** ({format_value(c.profit)}): "
+                + " · ".join(f"[step {i}]({l.url})" for i, l in enumerate(c.steps, 1))
             )
-            for c in chains[:25]:
-                st.markdown(
-                    f"**{' → '.join(c.items)}** ({format_value(c.profit)}): "
-                    + " · ".join(f"[step {i}]({l.url})" for i, l in enumerate(c.steps, 1))
-                )
+
+    st.fragment(run_every=3 if worker is not None else None)(_chain_panel)()
 
 # ------------------------------------------------------------------ watcher
 with st.expander(t("watcher_header")):
@@ -1311,17 +1316,3 @@ with st.expander(t("watcher_header")):
             with WATCHER_CONFIG_PATH.open("w", encoding="utf-8") as f:
                 json.dump(watcher_cfg, f, indent=2)
             st.success(t("watcher_saved"))
-
-# --------------------------------------------------------------- live loop
-# Kept at the very end so the whole page renders first. Streamlit interrupts
-# this sleep on any widget interaction; otherwise it re-runs the script when
-# the interval elapses and the scan above fires again.
-if live_mode and st.session_state.get("last_scan_ts") is not None:
-    _countdown = st.empty()
-    while True:
-        remaining = int(LIVE_SCAN_INTERVAL_SECONDS - (time.time() - st.session_state["last_scan_ts"]))
-        if remaining <= 0:
-            break
-        _countdown.caption(t("live_next", s=remaining))
-        time.sleep(min(5, remaining))
-    st.rerun()
