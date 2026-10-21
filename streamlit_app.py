@@ -434,6 +434,36 @@ VALUE_BASIS_LABELS = {
 }
 
 
+def _parse_millions(text: str) -> int | None:
+    """'250' -> 250 (millions); suffixes k/m/b/t: '1.5b' -> 1500, '1t' -> 1,000,000.
+    No upper limit. None if unparseable."""
+    raw = text.strip().lower().replace(",", "").replace("_", "").replace(" ", "")
+    if not raw:
+        return 0
+    mult = {"k": 0.001, "m": 1, "b": 1_000, "t": 1_000_000}
+    scale = 1
+    if raw[-1] in mult:
+        scale, raw = mult[raw[-1]], raw[:-1]
+    try:
+        return max(0, int(round(float(raw) * scale)))
+    except ValueError:
+        return None
+
+
+def money_input(label: str, *, key: str | None = None, value: int = 0, disabled: bool = False,
+                help: str | None = None) -> int:
+    """Free-typing amount in MILLIONS with k/m/b/t suffixes and no cap (1t = 1,000,000)."""
+    raw = st.text_input(
+        label, value=str(value), key=key, disabled=disabled,
+        help=(help + " " if help else "") + "Type millions, or use k / m / b / t (e.g. 500, 2.5b, 1t).",
+    )
+    parsed = _parse_millions(raw)
+    if parsed is None:
+        st.caption(f"⚠️ \"{raw}\" isn't a number — using 0.")
+        return 0
+    return parsed
+
+
 def t(key: str, **kwargs: object) -> str:
     template = TRANSLATIONS[key][st.session_state.get("lang", "en")]
     return template.format(**kwargs) if kwargs else template
@@ -705,9 +735,9 @@ if goals_mode == t("mode_saved"):
             st.write(f"- {line}")
 else:
     show_any = st.checkbox(t("show_any"), value=False)
-    min_profit_millions = st.number_input(t("min_profit"), 0, 1000000, 0, step=5, disabled=show_any)
+    min_profit_millions = money_input(t("min_profit"), disabled=show_any, key="g_min_profit")
     min_profit_pct = st.number_input(
-        t("min_profit_pct"), 0, 1000000, 0, step=5,
+        t("min_profit_pct"), 0, None, 0, step=5,
         help=t("min_profit_pct_help"),
         disabled=show_any,
     )
@@ -726,11 +756,9 @@ else:
             disabled=show_any,
         )
         value_basis = next(k for k, v in VALUE_BASIS_LABELS.items() if v == value_basis_label)
-        min_get_value_millions = st.number_input(t("min_get_value"), 0, 1000000, 0, step=5, disabled=show_any)
-        max_give_value_millions = st.number_input(
-            t("max_give_value"), 0, 1000000, 0, step=5,
-            help=t("max_give_value_help"),
-            disabled=show_any,
+        min_get_value_millions = money_input(t("min_get_value"), disabled=show_any, key="g_min_get")
+        max_give_value_millions = money_input(
+            t("max_give_value"), help=t("max_give_value_help"), disabled=show_any, key="g_max_give",
         )
         exclude_lose_wfl = st.checkbox(t("exclude_lose_wfl"), value=False, disabled=show_any)
         min_confidence = st.slider(
@@ -780,7 +808,7 @@ elif notify_mode == t("notify_mode_mine"):
         notify_cfg = _load_json(_mine[st.selectbox(t("notify_saved"), list(_mine.keys()))])
 elif notify_mode == t("notify_mode_build"):
     _n_items = st.multiselect(t("notify_items"), _catalog_names())
-    _n_min = st.number_input(t("notify_min_value"), 0, 1000000, 0, step=5)
+    _n_min = money_input(t("notify_min_value"), key="n_min_profit")
     notify_cfg = {"items": _n_items, "min_profit": _n_min * 1_000_000}
     _n_name = st.text_input(t("notify_save_name"))
     if st.button(t("notify_save_btn"), use_container_width=True) and _n_name.strip() and (_n_items or _n_min):
@@ -803,8 +831,8 @@ with st.expander("🛡️ Scam / fake filter"):
         "(get ÷ give − 100%): giving a 10M item for 20M of items is +100%. Applies to the table, "
         "the live checker, its alarm and chain trades. 0 = off."
     )
-    _sc_pct = st.number_input("Exclude profit above (% of what you give)", 0, 1000000, 0, step=25, key="scam_pct")
-    _sc_abs = st.number_input("Exclude profit above (millions)", 0, 1000000, 0, step=5, key="scam_abs")
+    _sc_pct = st.number_input("Exclude profit above (% of what you give)", 0, None, 0, step=25, key="scam_pct")
+    _sc_abs = money_input("Exclude profit above (millions)", key="scam_abs")
 scam_cfg = {
     "max_profit_pct": _sc_pct / 100 if _sc_pct else None,
     "max_profit": _sc_abs * 1_000_000 if _sc_abs else None,
@@ -1036,7 +1064,7 @@ with st.expander(t("chain_header"), expanded=False):
     chain_max_age = st.number_input(t("chain_max_age"), 1, 1440, 5, key="chain_max_age")
     chain_unlimited = st.checkbox("♾️ Unlimited steps", value=False, key="chain_unlimited")
     chain_max_steps = st.slider(t("chain_max_steps"), 2, 10, 3, key="chain_max_steps", disabled=chain_unlimited)
-    chain_min_profit = st.number_input(t("chain_min_profit"), 0, 1000000, 0, step=1, key="chain_min_profit")
+    chain_min_profit = money_input(t("chain_min_profit"), key="chain_min_profit")
     st.checkbox(
         "🔁 Also search chains on every live scan (runs alongside the live checker)",
         value=False, key="chain_auto",
@@ -1188,26 +1216,26 @@ with st.expander(t("watcher_header")):
             st.caption(t("rule_zero_off"))
             col_p1, col_p2 = st.columns(2)
             with col_p1:
-                r_min_profit_m = st.number_input(
-                    t("rule_min_profit"), min_value=0, max_value=1_000_000,
+                r_min_profit_m = money_input(
+                    t("rule_min_profit"),
                     value=int((raw_rule.get("min_profit") or 0) / 1_000_000),
-                    step=5, key=f"rule_minprofit_{uid}",
+                    key=f"rule_minprofit_{uid}",
                 )
-                r_min_get_m = st.number_input(
-                    t("rule_min_get_value"), min_value=0, max_value=1_000_000,
+                r_min_get_m = money_input(
+                    t("rule_min_get_value"),
                     value=int((raw_rule.get("min_get_value") or 0) / 1_000_000),
-                    step=5, key=f"rule_minget_{uid}",
+                    key=f"rule_minget_{uid}",
                 )
             with col_p2:
                 r_min_pct = st.number_input(
-                    t("rule_min_profit_pct"), min_value=0, max_value=1_000_000,
+                    t("rule_min_profit_pct"), min_value=0,
                     value=int(round((raw_rule.get("min_profit_pct") or 0) * 100)),
                     step=5, key=f"rule_minpct_{uid}",
                 )
-                r_max_give_m = st.number_input(
-                    t("rule_max_give_value"), min_value=0, max_value=1_000_000,
+                r_max_give_m = money_input(
+                    t("rule_max_give_value"),
                     value=int((raw_rule.get("max_give_value") or 0) / 1_000_000),
-                    step=5, key=f"rule_maxgive_{uid}",
+                    key=f"rule_maxgive_{uid}",
                 )
 
             r_gives = st.multiselect(
