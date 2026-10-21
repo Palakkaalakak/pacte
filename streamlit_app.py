@@ -865,6 +865,26 @@ auto_trigger = bool(
 # through the full 400-page deep-scan budget the 24/7 watcher uses.
 INTERACTIVE_GB_MAX_PAGES = 120
 
+def _run_chains(listings: list) -> None:
+    """Search chains over `listings` using the chain-section settings and store
+    the result in session state (rendered independently of the live checker)."""
+    from blox_trade_finder.core.chains import find_chains
+    from blox_trade_finder.core.normalize import inventory_counts
+    ss = st.session_state
+    targets: set[str] = set()
+    if goals.want_item:
+        targets = {goals.want_item} if isinstance(goals.want_item, str) else set(goals.want_item)
+    ss["chain_view"] = find_chains(
+        listings, inventory_counts(inventory),
+        value_basis=goals.value_basis,
+        max_age_minutes=ss.get("chain_max_age", 5),
+        max_steps=None if ss.get("chain_unlimited") else ss.get("chain_max_steps", 3),
+        min_profit=ss.get("chain_min_profit", 0) * 1_000_000,
+        target_names=targets,
+    )
+    ss["chain_view_ts"] = time.time()
+
+
 if find_clicked or auto_trigger:
     if not inventory.items:
         st.warning(t("need_item_warning"))
@@ -932,8 +952,7 @@ if find_clicked or auto_trigger:
         progress.progress(100, text=t("progress_done"))
         progress.empty()
 
-        for warning in result.name_warnings:
-            st.warning(warning)
+        st.session_state["last_listings"] = (time.time(), result.listings)
         matches = result.matches
         if st.session_state.get("recent_only", True):
             _cut = NOTIFY_MAX_AGE_MINUTES * 60
@@ -959,11 +978,10 @@ if find_clicked or auto_trigger:
         if live_mode and seen is not None:
             matches = [m for m in matches if keys[id(m)] not in seen]
         if new_hits:
-            st.error(t("notify_alert", n=len(new_hits)))
             _play_alarm(len(new_hits))
 
-        st.success(t("found_matches", count=len(matches)))
-
+        view = {"warnings": result.name_warnings, "count": len(matches),
+                "new_hits": len(new_hits), "df": None, "flags": []}
         if matches:
             new_ids = {id(m) for m in new_hits}
             matches = sorted(matches, key=lambda m: id(m) not in new_ids)  # new hits on top
@@ -982,21 +1000,37 @@ if find_clicked or auto_trigger:
                     t("col_posted"): _posted_ago(m.listing.created_at),
                     t("col_link"): m.listing.url,
                 })
-            df = pd.DataFrame(rows)
-            _flags = [id(m) in new_ids for m in matches]
-            styled = df.style.apply(
+            view["df"] = pd.DataFrame(rows)
+            view["flags"] = [id(m) in new_ids for m in matches]
+        st.session_state["last_view"] = view
+
+        # Chain search rides on the same fetched listings — no second scan.
+        if st.session_state.get("chain_auto"):
+            _run_chains(result.listings)
+
+# Render the latest results on EVERY run (scan, chain click, widget change…) so
+# the live checker's table and chain results coexist and neither wipes the other.
+_view = st.session_state.get("last_view")
+if _view:
+    for _w in _view["warnings"]:
+        st.warning(_w)
+    if _view["new_hits"]:
+        st.error(t("notify_alert", n=_view["new_hits"]))
+    st.success(t("found_matches", count=_view["count"]))
+    if _view["df"] is not None:
+        _flags = _view["flags"]
+        st.dataframe(
+            _view["df"].style.apply(
                 lambda r: ["background-color: #1faa59; color: white; font-weight: bold"] * len(r)
                 if _flags[r.name] else [""] * len(r),
                 axis=1,
-            )
-            st.dataframe(
-                styled,
-                use_container_width=True,
-                hide_index=True,
-                column_config={t("col_link"): st.column_config.LinkColumn(t("col_link"))},
-            )
-        else:
-            st.info(t("no_matches"))
+            ),
+            use_container_width=True,
+            hide_index=True,
+            column_config={t("col_link"): st.column_config.LinkColumn(t("col_link"))},
+        )
+    else:
+        st.info(t("no_matches"))
 
 # ------------------------------------------------------------------- chains
 with st.expander(t("chain_header"), expanded=False):
@@ -1005,52 +1039,49 @@ with st.expander(t("chain_header"), expanded=False):
     chain_unlimited = st.checkbox("♾️ Unlimited steps", value=False, key="chain_unlimited")
     chain_max_steps = st.slider(t("chain_max_steps"), 2, 10, 3, key="chain_max_steps", disabled=chain_unlimited)
     chain_min_profit = st.slider(t("chain_min_profit"), 0, 200, 0, step=1, key="chain_min_profit")
+    st.checkbox(
+        "🔁 Also search chains on every live scan (runs alongside the live checker)",
+        value=False, key="chain_auto",
+    )
     if st.button(t("chain_btn"), use_container_width=True, key="chain_btn"):
         if not inventory.items:
             st.warning(t("need_item_warning"))
         else:
-            from blox_trade_finder.core.chains import find_chains
-            from blox_trade_finder.core.normalize import inventory_counts
             try:
-                with st.spinner(t("progress_start")):
-                    _cres = run_scan(
-                        inventory, Goals(any=True), sources=selected_sources, deep=True,
-                        gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
-                    )
-                _targets = set()
-                if goals.want_item:
-                    _targets = {goals.want_item} if isinstance(goals.want_item, str) else set(goals.want_item)
-                chains = find_chains(
-                    _cres.listings, inventory_counts(inventory),
-                    value_basis=goals.value_basis,
-                    max_age_minutes=chain_max_age,
-                    max_steps=None if chain_unlimited else chain_max_steps,
-                    min_profit=chain_min_profit * 1_000_000,
-                    target_names=_targets,
-                )
+                cached = st.session_state.get("last_listings")
+                if cached and time.time() - cached[0] < LIVE_SCAN_INTERVAL_SECONDS:
+                    _run_chains(cached[1])  # reuse the live checker's fresh fetch
+                else:
+                    with st.spinner(t("progress_start")):
+                        _cres = run_scan(
+                            inventory, Goals(any=True), sources=selected_sources, deep=True,
+                            gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
+                        )
+                    st.session_state["last_listings"] = (time.time(), _cres.listings)
+                    _run_chains(_cres.listings)
             except Exception as exc:
                 st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
-                chains = None
-            if chains is not None:
-                st.success(t("chain_found", n=len(chains)))
-                if not chains:
-                    st.info(t("chain_none"))
-                else:
-                    st.dataframe(
-                        pd.DataFrame([{
-                            "Chain": " → ".join(c.items),
-                            "Steps": len(c.steps),
-                            t("col_profit"): format_value(c.profit),
-                            t("col_profit_pct"): f"{c.profit_pct:+.0%}",
-                            "Oldest step": f"{c.oldest_minutes:.0f}m",
-                        } for c in chains[:200]]),
-                        use_container_width=True, hide_index=True,
-                    )
-                    for c in chains[:25]:
-                        st.markdown(
-                            f"**{' → '.join(c.items)}** ({format_value(c.profit)}): "
-                            + " · ".join(f"[step {i}]({l.url})" for i, l in enumerate(c.steps, 1))
-                        )
+    chains = st.session_state.get("chain_view")
+    if chains is not None:
+        st.success(t("chain_found", n=len(chains)))
+        if not chains:
+            st.info(t("chain_none"))
+        else:
+            st.dataframe(
+                pd.DataFrame([{
+                    "Chain": " → ".join(c.items),
+                    "Steps": len(c.steps),
+                    t("col_profit"): format_value(c.profit),
+                    t("col_profit_pct"): f"{c.profit_pct:+.0%}",
+                    "Oldest step": f"{c.oldest_minutes:.0f}m",
+                } for c in chains[:200]]),
+                use_container_width=True, hide_index=True,
+            )
+            for c in chains[:25]:
+                st.markdown(
+                    f"**{' → '.join(c.items)}** ({format_value(c.profit)}): "
+                    + " · ".join(f"[step {i}]({l.url})" for i, l in enumerate(c.steps, 1))
+                )
 
 # ------------------------------------------------------------------ watcher
 with st.expander(t("watcher_header")):
