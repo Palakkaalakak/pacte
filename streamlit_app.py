@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,12 +36,18 @@ from blox_trade_finder.ui.table import format_value
 
 PRESETS_DIR = Path(__file__).parent / "config" / "presets"
 USER_INVENTORIES_DIR = Path(__file__).parent / "config" / "user_inventories"
+USER_NOTIFY_DIR = Path(__file__).parent / "config" / "user_notify"
 WATCHER_CONFIG_PATH = Path(__file__).parent / "config" / "watcher.json"
 
 INVENTORY_PRESETS = {
     "Palakkaalakak's": PRESETS_DIR / "creation_inventory.json",
     "Cscgde's": PRESETS_DIR / "green_lightning_inventory.json",
 }
+NOTIFY_PRESETS = {
+    "Palakkaalakak's": PRESETS_DIR / "creation_notify.json",
+    "Cscgde's": PRESETS_DIR / "green_lightning_notify.json",
+}
+LIVE_SCAN_INTERVAL_SECONDS = 5 * 60
 GOALS_PRESETS = {
     "Palakkaalakak's": PRESETS_DIR / "creation_goals.json",
     "Cscgde's": PRESETS_DIR / "green_lightning_goals.json",
@@ -155,7 +162,35 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "See what these goals look for",
         "it": "Guarda cosa cercano questi obiettivi",
     },
-    "header_sources": {"en": "3. Where to look", "it": "3. Dove cercare"},
+    "header_notify": {"en": "3. Wanted - Notify (loud sound)", "it": "3. Cercati - Notifica (suono forte)"},
+    "notify_intro": {
+        "en": "A loud alarm plays in your browser when a trade gives you one of these items OR is worth at least the minimum value.",
+        "it": "Nel browser suona un allarme forte quando uno scambio ti dà uno di questi oggetti OPPURE vale almeno il valore minimo.",
+    },
+    "notify_off": {"en": "No notifications", "it": "Nessuna notifica"},
+    "notify_mode_saved": {"en": "Use a saved setup", "it": "Usa una configurazione salvata"},
+    "notify_mode_mine": {"en": "My saved lists", "it": "Le mie liste salvate"},
+    "notify_mode_build": {"en": "Build my own", "it": "Crea la tua"},
+    "notify_saved": {"en": "Saved notify list", "it": "Lista di notifica salvata"},
+    "notify_items": {"en": "Notify me when a trade gives one of these", "it": "Avvisami quando uno scambio dà uno di questi"},
+    "notify_min_value": {"en": "...or when it is worth at least (millions, 0 = off)", "it": "...o quando vale almeno (milioni, 0 = off)"},
+    "notify_save_name": {"en": "Name to save this list as", "it": "Nome con cui salvare questa lista"},
+    "notify_save_btn": {"en": "💾 Save notify list", "it": "💾 Salva lista di notifica"},
+    "notify_saved_ok": {"en": "Saved \"{name}\"!", "it": "Salvato \"{name}\"!"},
+    "notify_summary": {
+        "en": "Alarm if a trade gives: {items} | or is worth {value}+",
+        "it": "Allarme se uno scambio dà: {items} | o vale {value}+",
+    },
+    "notify_no_saved": {"en": "No saved notify lists yet.", "it": "Nessuna lista di notifica salvata."},
+    "live_toggle": {
+        "en": "🔁 Live mode: rescan every 5 minutes & sound the alarm on new hits",
+        "it": "🔁 Modalità live: riscansiona ogni 5 minuti e suona l'allarme sui nuovi risultati",
+    },
+    "live_next": {"en": "Next automatic scan in {s}s (keep this tab open)", "it": "Prossima scansione automatica tra {s}s (tieni aperta questa scheda)"},
+    "notify_test": {"en": "🔊 Test alarm sound", "it": "🔊 Prova suono allarme"},
+    "notify_alert": {"en": "🚨 {n} new notify hit(s)!", "it": "🚨 {n} nuovi risultati da notificare!"},
+    "col_notify": {"en": "🔔", "it": "🔔"},
+    "header_sources": {"en": "4. Where to look", "it": "4. Dove cercare"},
     "sources_both": {"en": "Both sites", "it": "Entrambi i siti"},
     "sources_gb_only": {"en": "Gamersberg only", "it": "Solo Gamersberg"},
     "sources_bfv_only": {"en": "bloxfruitsvalues.com only", "it": "Solo bloxfruitsvalues.com"},
@@ -500,6 +535,52 @@ def _goals_preview_lines(goals: Goals) -> list[str]:
     return lines
 
 
+# ------------------------------------------------------------------- notify
+def _name_words(name: str) -> frozenset[str]:
+    return frozenset(w for w in re.split(r"[^a-z0-9]+", name.lower()) if w and w != "permanent")
+
+
+def _notify_reason(match, cfg: dict) -> str | None:
+    """Why `match` should sound the alarm (OR semantics), or None."""
+    wanted = [_name_words(n) for n in cfg.get("items", []) if _name_words(n)]
+    for item in match.listing.give:
+        words = _name_words(item.name)
+        if any(w <= words for w in wanted):
+            return item.name
+    min_value = cfg.get("min_get_value") or 0
+    if min_value and match.get_value >= min_value:
+        return format_value(match.get_value)
+    return None
+
+
+def _list_user_notify() -> dict[str, Path]:
+    if not USER_NOTIFY_DIR.exists():
+        return {}
+    return {p.stem.replace("_", " "): p for p in sorted(USER_NOTIFY_DIR.glob("*.json"))}
+
+
+def _alarm_html(count: int) -> str:
+    """Loud siren via WebAudio. Unique per call so the iframe re-runs it."""
+    return f"""<script>/* {time.time()}-{count} */
+(function(){{
+  try {{ window.parent.document.title = "🚨 {count} TRADE HIT(S)!"; }} catch(e) {{}}
+  try {{
+    var C = new (window.AudioContext || window.webkitAudioContext)();
+    var g = C.createGain(); g.gain.value = 1.0; g.connect(C.destination);
+    var o = C.createOscillator(); o.type = "square"; o.connect(g);
+    var t0 = C.currentTime;
+    for (var i = 0; i < 24; i++) o.frequency.setValueAtTime(i % 2 ? 660 : 990, t0 + i * 0.25);
+    o.start(t0); o.stop(t0 + 6);
+  }} catch(e) {{}}
+}})();
+</script>"""
+
+
+def _play_alarm(count: int) -> None:
+    import streamlit.components.v1 as components
+    components.html(_alarm_html(count), height=0)
+
+
 st.set_page_config(page_title="Blox Fruits Trade Finder", page_icon="🍈", layout="centered")
 
 # ------------------------------------------------------------------ language
@@ -663,6 +744,39 @@ else:
         for line in _goals_preview_lines(goals):
             st.write(f"- {line}")
 
+# ------------------------------------------------------------------- notify
+st.header(t("header_notify"))
+st.caption(t("notify_intro"))
+_nm_opts = [t("notify_off"), t("notify_mode_saved"), t("notify_mode_mine"), t("notify_mode_build")]
+notify_mode = st.radio("Notify", _nm_opts, index=1, horizontal=True, label_visibility="collapsed")
+notify_cfg: dict = {}
+if notify_mode == t("notify_mode_saved"):
+    _nc = st.selectbox(t("notify_saved"), list(NOTIFY_PRESETS.keys()))
+    notify_cfg = _load_json(NOTIFY_PRESETS[_nc])
+elif notify_mode == t("notify_mode_mine"):
+    _mine = _list_user_notify()
+    if not _mine:
+        st.info(t("notify_no_saved"))
+    else:
+        notify_cfg = _load_json(_mine[st.selectbox(t("notify_saved"), list(_mine.keys()))])
+elif notify_mode == t("notify_mode_build"):
+    _n_items = st.multiselect(t("notify_items"), _catalog_names())
+    _n_min = st.slider(t("notify_min_value"), 0, 500, 0, step=5)
+    notify_cfg = {"items": _n_items, "min_get_value": _n_min * 1_000_000}
+    _n_name = st.text_input(t("notify_save_name"))
+    if st.button(t("notify_save_btn"), use_container_width=True) and _n_name.strip() and (_n_items or _n_min):
+        USER_NOTIFY_DIR.mkdir(parents=True, exist_ok=True)
+        (USER_NOTIFY_DIR / f"{_safe_filename(_n_name)}.json").write_text(
+            json.dumps(notify_cfg, indent=2), encoding="utf-8"
+        )
+        st.success(t("notify_saved_ok", name=_n_name.strip()))
+if notify_cfg:
+    st.caption(t(
+        "notify_summary",
+        items=", ".join(notify_cfg.get("items", [])) or "—",
+        value=format_value(notify_cfg.get("min_get_value") or 0),
+    ))
+
 # ------------------------------------------------------------------ sources
 st.header(t("header_sources"))
 SOURCE_CHOICES = {
@@ -681,6 +795,15 @@ selected_sources = SOURCE_CHOICES[source_label]
 
 # ------------------------------------------------------------------- action
 find_clicked = st.button(t("find_trades"), type="primary", use_container_width=True)
+live_mode = st.toggle(t("live_toggle"), value=False, key="live_mode")
+if notify_cfg and st.button(t("notify_test")):
+    _play_alarm(0)
+
+# Live mode: auto-trigger a scan once the interval has elapsed since the last one.
+_last_scan = st.session_state.get("last_scan_ts")
+auto_trigger = bool(
+    live_mode and (_last_scan is None or time.time() - _last_scan >= LIVE_SCAN_INTERVAL_SECONDS)
+)
 
 # Interactive scans page the Gamersberg feed at ~1 request/second. Cap the
 # page count so a first-ever scan on a fresh server (e.g. Streamlit Cloud,
@@ -688,7 +811,7 @@ find_clicked = st.button(t("find_trades"), type="primary", use_container_width=T
 # through the full 400-page deep-scan budget the 24/7 watcher uses.
 INTERACTIVE_GB_MAX_PAGES = 120
 
-if find_clicked:
+if find_clicked or auto_trigger:
     if not inventory.items:
         st.warning(t("need_item_warning"))
         st.stop()
@@ -748,40 +871,57 @@ if find_clicked:
         import traceback
         with st.expander(t("scan_failed_details")):
             st.code(traceback.format_exc())
-        st.stop()
-    progress.progress(100, text=t("progress_done"))
-    progress.empty()
+        result = None
+        st.session_state["last_scan_ts"] = time.time()
+    if result is not None:
+        st.session_state["last_scan_ts"] = time.time()
+        progress.progress(100, text=t("progress_done"))
+        progress.empty()
 
-    for warning in result.name_warnings:
-        st.warning(warning)
-    matches = result.matches
+        for warning in result.name_warnings:
+            st.warning(warning)
+        matches = result.matches
 
-    st.success(t("found_matches", count=len(matches)))
-
-    if matches:
-        rows = []
+        # Sound alarm: notify-list hits not already alarmed on in this session.
+        reasons = {id(m): _notify_reason(m, notify_cfg) for m in matches} if notify_cfg else {}
+        notified = st.session_state.setdefault("notified_ids", set())
+        new_hits = []
         for m in matches:
-            rows.append({
-                t("col_source"): m.listing.source,
-                t("col_you_give"): ", ".join(i.name for i in m.listing.want),
-                t("col_you_get"): ", ".join(i.name for i in m.listing.give),
-                t("col_profit"): format_value(m.delta),
-                t("col_profit_pct"): f"{m.profit_pct:+.0%}",
-                t("col_demand"): m.demand,
-                t("col_verdict"): m.verdict.upper(),
-                t("col_confidence"): f"{m.confidence}%",
-                t("col_posted"): _posted_ago(m.listing.created_at),
-                t("col_link"): m.listing.url,
-            })
-        df = pd.DataFrame(rows)
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={t("col_link"): st.column_config.LinkColumn(t("col_link"))},
-        )
-    else:
-        st.info(t("no_matches"))
+            key = f"{m.listing.source}:{m.listing.id}"
+            if reasons.get(id(m)) and key not in notified:
+                notified.add(key)
+                new_hits.append(m)
+        if new_hits:
+            st.error(t("notify_alert", n=len(new_hits)))
+            _play_alarm(len(new_hits))
+
+        st.success(t("found_matches", count=len(matches)))
+
+        if matches:
+            rows = []
+            for m in matches:
+                rows.append({
+                    t("col_notify"): "🔔 " + reasons[id(m)] if reasons.get(id(m)) else "",
+                    t("col_source"): m.listing.source,
+                    t("col_you_give"): ", ".join(i.name for i in m.listing.want),
+                    t("col_you_get"): ", ".join(i.name for i in m.listing.give),
+                    t("col_profit"): format_value(m.delta),
+                    t("col_profit_pct"): f"{m.profit_pct:+.0%}",
+                    t("col_demand"): m.demand,
+                    t("col_verdict"): m.verdict.upper(),
+                    t("col_confidence"): f"{m.confidence}%",
+                    t("col_posted"): _posted_ago(m.listing.created_at),
+                    t("col_link"): m.listing.url,
+                })
+            df = pd.DataFrame(rows)
+            st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={t("col_link"): st.column_config.LinkColumn(t("col_link"))},
+            )
+        else:
+            st.info(t("no_matches"))
 
 # ------------------------------------------------------------------ watcher
 with st.expander(t("watcher_header")):
@@ -1011,3 +1151,17 @@ with st.expander(t("watcher_header")):
             with WATCHER_CONFIG_PATH.open("w", encoding="utf-8") as f:
                 json.dump(watcher_cfg, f, indent=2)
             st.success(t("watcher_saved"))
+
+# --------------------------------------------------------------- live loop
+# Kept at the very end so the whole page renders first. Streamlit interrupts
+# this sleep on any widget interaction; otherwise it re-runs the script when
+# the interval elapses and the scan above fires again.
+if live_mode and st.session_state.get("last_scan_ts") is not None:
+    _countdown = st.empty()
+    while True:
+        remaining = int(LIVE_SCAN_INTERVAL_SECONDS - (time.time() - st.session_state["last_scan_ts"]))
+        if remaining <= 0:
+            break
+        _countdown.caption(t("live_next", s=remaining))
+        time.sleep(min(5, remaining))
+    st.rerun()
