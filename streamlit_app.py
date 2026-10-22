@@ -862,9 +862,9 @@ selected_sources = SOURCE_CHOICES[source_label]
 
 # ------------------------------------------------------------------- action
 find_clicked = st.button(t("find_trades"), type="primary", use_container_width=True)
-st.checkbox(
-    f"Only show trades posted in the last {NOTIFY_MAX_AGE_MINUTES} minutes",
-    value=True, key="recent_only",
+st.number_input(
+    "Max trade age in minutes (0 = no limit) — hides older listings and silences their alarms",
+    min_value=0, value=NOTIFY_MAX_AGE_MINUTES, step=1, key="max_age_min",
 )
 live_mode = st.toggle(t("live_toggle"), value=False, key="live_mode")
 if notify_cfg and st.button(t("notify_test")):
@@ -900,7 +900,7 @@ if live_mode and inventory.items:
     if worker is None or not worker.alive:
         worker = LiveWorker(
             inventory=inventory, goals=goals, sources=selected_sources, notify_cfg=notify_cfg,
-            recent_only=st.session_state.get("recent_only", True), scam_cfg=scam_cfg,
+            max_age_minutes=st.session_state.get("max_age_min") or None, scam_cfg=scam_cfg,
             chain_cfg=_chain_cfg() if st.session_state.get("chain_auto") else None,
             interval_seconds=LIVE_SCAN_INTERVAL_SECONDS, gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
         )
@@ -910,7 +910,7 @@ if live_mode and inventory.items:
     else:  # push current settings into the running checker
         worker.inventory, worker.goals, worker.sources = inventory, goals, selected_sources
         worker.notify_cfg, worker.scam_cfg = notify_cfg, scam_cfg
-        worker.recent_only = st.session_state.get("recent_only", True)
+        worker.max_age_minutes = st.session_state.get("max_age_min") or None
         worker.chain_cfg = _chain_cfg() if st.session_state.get("chain_auto") else None
 elif worker is not None:
     worker.stop()
@@ -998,7 +998,7 @@ if find_clicked:
         progress.empty()
         st.session_state["last_listings"] = (time.time(), result.listings)
         view, st.session_state["seen_listing_ids"] = build_view(
-            result, notify_cfg, recent_only=st.session_state.get("recent_only", True),
+            result, notify_cfg, max_age_minutes=st.session_state.get("max_age_min") or None,
             only_new=False, seen=st.session_state.get("seen_listing_ids"), scam_cfg=scam_cfg,
         )
         st.session_state["last_view"] = view
@@ -1012,6 +1012,8 @@ def _render_view(view: dict) -> None:
     if view["new_hits"]:
         st.error(t("notify_alert", n=view["new_hits"]))
     st.success(t("found_matches", count=view["count"]))
+    if view.get("too_old"):
+        st.caption(f"⏱️ {view['too_old']} matching trade(s) hidden — older than the max trade age")
     if view.get("excluded"):
         st.caption(f"🛡️ {view['excluded']} suspicious/uncertain trade(s) hidden by the scam filter")
     if not view["rows"]:

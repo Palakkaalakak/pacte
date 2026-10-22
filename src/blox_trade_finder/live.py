@@ -32,11 +32,11 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def notify_reason(match: Match, cfg: dict) -> str | None:
+def notify_reason(match: Match, cfg: dict, max_age_minutes: float | None = NOTIFY_MAX_AGE_MINUTES) -> str | None:
     """Why `match` should sound the alarm (OR semantics), or None. Only
     listings posted within NOTIFY_MAX_AGE_MINUTES qualify. The threshold is
     PROFIT (received - given); "min_get_value" is a legacy saved-list key."""
-    if (datetime.now(timezone.utc) - _aware(match.listing.created_at)).total_seconds() > NOTIFY_MAX_AGE_MINUTES * 60:
+    if max_age_minutes and (datetime.now(timezone.utc) - _aware(match.listing.created_at)).total_seconds() > max_age_minutes * 60:
         return None
     wanted = [_name_words(n) for n in cfg.get("items", []) if _name_words(n)]
     for item in match.listing.give:
@@ -77,7 +77,7 @@ def filter_chains(chains: list, cfg: dict | None) -> list:
 
 
 def build_view(
-    result, notify_cfg: dict, *, recent_only: bool, only_new: bool, seen: set[str] | None,
+    result, notify_cfg: dict, *, max_age_minutes: float | None, only_new: bool, seen: set[str] | None,
     scam_cfg: dict | None = None,
 ) -> tuple[dict, set[str]]:
     """Turn a ScanResult into a language-neutral view + the updated seen-set.
@@ -85,10 +85,12 @@ def build_view(
     Alarm hits are notify matches NOT in any earlier scan (first scan = silent
     baseline). With `only_new`, listings seen before are dropped from the table."""
     matches = result.matches
-    if recent_only:
-        cut = NOTIFY_MAX_AGE_MINUTES * 60
+    too_old = 0
+    if max_age_minutes:
+        cut = max_age_minutes * 60
         now = datetime.now(timezone.utc)
-        matches = [m for m in matches if (now - _aware(m.listing.created_at)).total_seconds() <= cut]
+        kept_age = [m for m in matches if (now - _aware(m.listing.created_at)).total_seconds() <= cut]
+        too_old, matches = len(matches) - len(kept_age), kept_age
     excluded = 0
     if scam_cfg:
         kept = [
@@ -96,7 +98,7 @@ def build_view(
             if not is_scam(m.delta, m.profit_pct, scam_cfg) and not has_blocked_item(m.listing, scam_cfg)
         ]
         excluded, matches = len(matches) - len(kept), kept
-    reasons = {id(m): notify_reason(m, notify_cfg) for m in matches} if notify_cfg else {}
+    reasons = {id(m): notify_reason(m, notify_cfg, max_age_minutes) for m in matches} if notify_cfg else {}
     keys = {id(m): f"{m.listing.source}:{m.listing.id}" for m in matches}
     new_hits = (
         {id(m) for m in matches if reasons.get(id(m)) and keys[id(m)] not in seen}
@@ -122,7 +124,7 @@ def build_view(
     } for m in matches]
     view = {
         "rows": rows, "count": len(rows), "new_hits": len(new_hits),
-        "excluded": excluded, "warnings": list(result.name_warnings), "ts": time.time(),
+        "excluded": excluded, "too_old": too_old, "warnings": list(result.name_warnings), "ts": time.time(),
     }
     return view, new_seen
 
@@ -136,7 +138,7 @@ class LiveWorker:
         sources: list[str],
         notify_cfg: dict,
         scam_cfg: dict | None = None,
-        recent_only: bool,
+        max_age_minutes: float | None,
         chain_cfg: dict | None,
         interval_seconds: int = 300,
         gb_max_pages: int | None = None,
@@ -144,7 +146,7 @@ class LiveWorker:
         scan_fn: Callable = run_scan,
     ) -> None:
         self.inventory, self.goals, self.sources = inventory, goals, sources
-        self.notify_cfg, self.recent_only, self.chain_cfg = notify_cfg, recent_only, chain_cfg
+        self.notify_cfg, self.max_age_minutes, self.chain_cfg = notify_cfg, max_age_minutes, chain_cfg
         self.scam_cfg = scam_cfg
         self.interval, self.gb_max_pages = interval_seconds, gb_max_pages
         self.idle_timeout, self._scan_fn = idle_timeout_seconds, scan_fn
@@ -184,7 +186,7 @@ class LiveWorker:
                 gb_max_pages=self.gb_max_pages,
             )
             view, self._seen = build_view(
-                result, self.notify_cfg, recent_only=self.recent_only, only_new=True, seen=self._seen,
+                result, self.notify_cfg, max_age_minutes=self.max_age_minutes, only_new=True, seen=self._seen,
                 scam_cfg=self.scam_cfg,
             )
             chains = None

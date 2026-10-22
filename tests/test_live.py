@@ -15,7 +15,7 @@ def test_worker_scans_repeatedly_and_stops() -> None:
 
     w = LiveWorker(
         inventory=Inventory(items=[InventoryEntry(name="X")]), goals=Goals(any=True),
-        sources=["gamersberg"], notify_cfg={}, recent_only=True, chain_cfg=None,
+        sources=["gamersberg"], notify_cfg={}, max_age_minutes=10, chain_cfg=None,
         interval_seconds=1, scan_fn=fake_scan,
     )
     w.start()
