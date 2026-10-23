@@ -870,6 +870,9 @@ st.number_input(
     "Hide trades older than (minutes, 0 = show all)", min_value=0, value=0, step=1, key="max_age_min",
 )
 live_mode = st.toggle(t("live_toggle"), value=False, key="live_mode")
+live_interval = 60 * st.radio(
+    "Scan every", [5, 2], horizontal=True, format_func=lambda m: f"{m} min", key="live_interval_min",
+)
 if notify_cfg and st.button(t("notify_test")):
     _play_alarm(0)
 with st.expander("🛠 Debug: delayed alarm"):
@@ -906,7 +909,7 @@ if live_mode and inventory.items:
             max_age_minutes=st.session_state.get("max_age_min") or None, scam_cfg=scam_cfg,
             notify_age_minutes=_notify_age or None,
             chain_cfg=_chain_cfg() if st.session_state.get("chain_auto") else None,
-            interval_seconds=LIVE_SCAN_INTERVAL_SECONDS, gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
+            interval_seconds=live_interval, gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
         )
         worker.start()
         st.session_state["live_worker"] = worker
@@ -914,6 +917,7 @@ if live_mode and inventory.items:
     else:  # push current settings into the running checker
         worker.inventory, worker.goals, worker.sources = inventory, goals, selected_sources
         worker.notify_cfg, worker.scam_cfg = notify_cfg, scam_cfg
+        worker.interval = live_interval
         worker.max_age_minutes = st.session_state.get("max_age_min") or None
         worker.notify_age_minutes = _notify_age or None
         worker.chain_cfg = _chain_cfg() if st.session_state.get("chain_auto") else None
@@ -1053,7 +1057,7 @@ def _live_panel() -> None:
         if snap["scanning"]:
             st.caption("🔄 Live checker: scanning…")
         elif snap["last_scan_ts"]:
-            left = max(0, int(LIVE_SCAN_INTERVAL_SECONDS - (time.time() - snap["last_scan_ts"])))
+            left = max(0, int(worker.interval - (time.time() - snap["last_scan_ts"])))
             st.caption(f"🟢 Live checker running — scan #{snap['scans']}, next in {left}s")
         if snap["error"]:
             st.error(t("scan_failed", error=snap["error"]))

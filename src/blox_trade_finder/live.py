@@ -217,8 +217,8 @@ class LiveWorker:
     def _loop(self) -> None:
         while not self._stop.is_set():
             self._scan_once()
-            deadline = time.time() + self.interval
-            while not self._stop.is_set() and time.time() < deadline:
+            started = time.time()
+            while not self._stop.is_set() and time.time() < started + self.interval:  # interval may change live
                 if time.time() - self._last_seen_by_ui > self.idle_timeout:
                     self._stop.set()  # browser tab gone — don't scan forever
                     return
