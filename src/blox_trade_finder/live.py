@@ -78,7 +78,7 @@ def filter_chains(chains: list, cfg: dict | None) -> list:
 
 def build_view(
     result, notify_cfg: dict, *, max_age_minutes: float | None, only_new: bool, seen: set[str] | None,
-    scam_cfg: dict | None = None,
+    scam_cfg: dict | None = None, notify_age_minutes: float | None = NOTIFY_MAX_AGE_MINUTES,
 ) -> tuple[dict, set[str]]:
     """Turn a ScanResult into a language-neutral view + the updated seen-set.
 
@@ -98,7 +98,7 @@ def build_view(
             if not is_scam(m.delta, m.profit_pct, scam_cfg) and not has_blocked_item(m.listing, scam_cfg)
         ]
         excluded, matches = len(matches) - len(kept), kept
-    reasons = {id(m): notify_reason(m, notify_cfg, max_age_minutes) for m in matches} if notify_cfg else {}
+    reasons = {id(m): notify_reason(m, notify_cfg, notify_age_minutes) for m in matches} if notify_cfg else {}
     keys = {id(m): f"{m.listing.source}:{m.listing.id}" for m in matches}
     new_hits = (
         {id(m) for m in matches if reasons.get(id(m)) and keys[id(m)] not in seen}
@@ -139,6 +139,7 @@ class LiveWorker:
         notify_cfg: dict,
         scam_cfg: dict | None = None,
         max_age_minutes: float | None,
+        notify_age_minutes: float | None = NOTIFY_MAX_AGE_MINUTES,
         chain_cfg: dict | None,
         interval_seconds: int = 300,
         gb_max_pages: int | None = None,
@@ -148,6 +149,7 @@ class LiveWorker:
         self.inventory, self.goals, self.sources = inventory, goals, sources
         self.notify_cfg, self.max_age_minutes, self.chain_cfg = notify_cfg, max_age_minutes, chain_cfg
         self.scam_cfg = scam_cfg
+        self.notify_age_minutes = notify_age_minutes
         self.interval, self.gb_max_pages = interval_seconds, gb_max_pages
         self.idle_timeout, self._scan_fn = idle_timeout_seconds, scan_fn
         self._lock = threading.Lock()
@@ -187,7 +189,7 @@ class LiveWorker:
             )
             view, self._seen = build_view(
                 result, self.notify_cfg, max_age_minutes=self.max_age_minutes, only_new=True, seen=self._seen,
-                scam_cfg=self.scam_cfg,
+                scam_cfg=self.scam_cfg, notify_age_minutes=self.notify_age_minutes,
             )
             chains = None
             if self.chain_cfg is not None:

@@ -817,6 +817,10 @@ elif notify_mode == t("notify_mode_build"):
             json.dumps(notify_cfg, indent=2), encoding="utf-8"
         )
         st.success(t("notify_saved_ok", name=_n_name.strip()))
+_notify_age = st.number_input(
+    "Alarm only for trades posted within (minutes, 0 = any age)", min_value=0,
+    value=NOTIFY_MAX_AGE_MINUTES, step=1, key="notify_age_min",
+)
 if notify_cfg:
     st.caption(t(
         "notify_summary",
@@ -863,8 +867,7 @@ selected_sources = SOURCE_CHOICES[source_label]
 # ------------------------------------------------------------------- action
 find_clicked = st.button(t("find_trades"), type="primary", use_container_width=True)
 st.number_input(
-    "Max trade age in minutes (0 = no limit) — hides older listings and silences their alarms",
-    min_value=0, value=NOTIFY_MAX_AGE_MINUTES, step=1, key="max_age_min",
+    "Hide trades older than (minutes, 0 = show all)", min_value=0, value=0, step=1, key="max_age_min",
 )
 live_mode = st.toggle(t("live_toggle"), value=False, key="live_mode")
 if notify_cfg and st.button(t("notify_test")):
@@ -901,6 +904,7 @@ if live_mode and inventory.items:
         worker = LiveWorker(
             inventory=inventory, goals=goals, sources=selected_sources, notify_cfg=notify_cfg,
             max_age_minutes=st.session_state.get("max_age_min") or None, scam_cfg=scam_cfg,
+            notify_age_minutes=_notify_age or None,
             chain_cfg=_chain_cfg() if st.session_state.get("chain_auto") else None,
             interval_seconds=LIVE_SCAN_INTERVAL_SECONDS, gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
         )
@@ -911,6 +915,7 @@ if live_mode and inventory.items:
         worker.inventory, worker.goals, worker.sources = inventory, goals, selected_sources
         worker.notify_cfg, worker.scam_cfg = notify_cfg, scam_cfg
         worker.max_age_minutes = st.session_state.get("max_age_min") or None
+        worker.notify_age_minutes = _notify_age or None
         worker.chain_cfg = _chain_cfg() if st.session_state.get("chain_auto") else None
 elif worker is not None:
     worker.stop()
@@ -1000,6 +1005,7 @@ if find_clicked:
         view, st.session_state["seen_listing_ids"] = build_view(
             result, notify_cfg, max_age_minutes=st.session_state.get("max_age_min") or None,
             only_new=False, seen=st.session_state.get("seen_listing_ids"), scam_cfg=scam_cfg,
+            notify_age_minutes=_notify_age or None,
         )
         st.session_state["last_view"] = view
         if view["new_hits"]:
