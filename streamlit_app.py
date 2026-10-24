@@ -1170,12 +1170,12 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
                     inventory_counts=_inv_counts(inventory) if arb_mine else None,
                 )
                 _trades = [x for x in _trades if not is_scam(x.profit, x.profit_pct, scam_cfg)]
-                st.session_state["arb_view"] = {
+                st.session_state["arb_view2"] = {
                     "gaps": item_gaps(_alist, min_ratio=arb_ratio), "trades": _trades, "ts": time.time(),
                 }
             except Exception as exc:
                 st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
-    _arb = st.session_state.get("arb_view")
+    _arb = st.session_state.get("arb_view2")
     if _arb:
         st.subheader(f"Arbitrage ({len(_arb['trades'])})")
         if _arb["trades"]:
