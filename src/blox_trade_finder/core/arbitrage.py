@@ -12,6 +12,7 @@ bloxfruitsvalues price seen so Gamersberg-sourced listings can be re-valued too.
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime, timezone
 from dataclasses import dataclass
 
 from blox_trade_finder.models import CatalogItem, Listing
@@ -55,6 +56,14 @@ class ItemArb:
     @property
     def profit_pct(self) -> float:
         return self.profit / self.cost if self.cost else 0.0
+
+    @property
+    def oldest_minutes(self) -> float:
+        now = datetime.now(timezone.utc)
+        return max(
+            (now - (l.created_at if l.created_at.tzinfo else l.created_at.replace(tzinfo=timezone.utc))).total_seconds() / 60
+            for l in (self.buy, self.sell)
+        )
 
     @property
     def cross_site(self) -> bool:
@@ -103,6 +112,8 @@ def find_item_arbitrage(
     cross_site_only: bool = True,
     inventory_counts: Counter[str] | None = None,
     per_item: int = 5,
+    max_age_minutes: float | None = None,
+    now: datetime | None = None,
 ) -> list[ItemArb]:
     """Same-item arbitrage. For every item X: a listing that GIVES exactly one X
     (the buy) paired with a listing that WANTS exactly one X (the sell). You pay the
@@ -110,6 +121,12 @@ def find_item_arbitrage(
     Both legs are valued with ONE common basis so the profit is real, not a valuation
     artifact. `inventory_counts` restricts buys to ones you can pay for."""
     bfv_map = bfv_value_map(listings)
+    now = now or datetime.now(timezone.utc)
+    if max_age_minutes:  # stale ads are probably filled or the poster is offline
+        def _fresh(l: Listing) -> bool:
+            c = l.created_at if l.created_at.tzinfo else l.created_at.replace(tzinfo=timezone.utc)
+            return (now - c).total_seconds() <= max_age_minutes * 60
+        listings = [l for l in listings if _fresh(l)]
 
     def val(items: list[CatalogItem]) -> int:
         if value_basis == BFV:

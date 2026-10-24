@@ -36,3 +36,13 @@ def test_same_site_excluded_by_default_and_no_loss() -> None:
     assert len(find_item_arbitrage([buy, sell], cross_site_only=False)) == 1
     bad = _l("bad", [X], [_it("G", 50, 50, 4)], source="bloxfruitsvalues")
     assert find_item_arbitrage([buy, bad], cross_site_only=True) == []
+
+
+def test_arbitrage_drops_stale_listing() -> None:
+    from datetime import timedelta
+    buy = _l("buy", [_it("W", 80, 80, 2)], [X], source="bloxfruitsvalues")
+    sell = _l("sell", [X], [_it("G", 120, 120, 3)], source="gamersberg")
+    sell.created_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+    assert find_item_arbitrage([buy, sell], max_age_minutes=10) == []
+    assert len(find_item_arbitrage([buy, sell], max_age_minutes=60)) == 1
+    assert len(find_item_arbitrage([buy, sell])) == 1

@@ -1143,6 +1143,10 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
     )
     arb_pct = st.number_input("Min profit % (on either site's values)", 0, None, 10, step=5, key="arb_pct")
     arb_ratio = st.number_input("Min item value ratio for the gap table (x)", 1.0, None, 1.25, step=0.05, key="arb_ratio")
+    arb_age = st.number_input(
+        "Max age of each listing (minutes, 0 = any)", 0, None, 10, step=1, key="arb_age",
+        help="Older ads are likely already filled or the poster is offline.",
+    )
     arb_cross = st.checkbox("Cross-site only (buy on one site, sell on the other)", value=True, key="arb_cross")
     arb_basis = st.selectbox("Value basis for profit", ["gamersberg", "bloxfruitsvalues"], key="arb_basis")
     arb_mine = st.checkbox("Only trades I can make with my inventory", value=True, key="arb_mine")
@@ -1166,7 +1170,7 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
                     _alist = _ares.listings
                 _alist = filter_listings(_alist, scam_cfg)
                 _trades = find_item_arbitrage(
-                    _alist, value_basis=arb_basis, min_pct=arb_pct / 100, cross_site_only=arb_cross,
+                    _alist, value_basis=arb_basis, min_pct=arb_pct / 100, cross_site_only=arb_cross, max_age_minutes=arb_age or None,
                     inventory_counts=_inv_counts(inventory) if arb_mine else None,
                 )
                 _trades = [x for x in _trades if not is_scam(x.profit, x.profit_pct, scam_cfg)]
@@ -1186,6 +1190,7 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
                     "Buy on": x.buy.source,
                     "Sell: you get": ", ".join(i.name for i in x.sell.give),
                     "Sell on": x.sell.source,
+                    "Oldest leg": f"{x.oldest_minutes:.0f}m",
                     "Cost": format_value(x.cost), "Revenue": format_value(x.revenue),
                     "Profit": f"{format_value(x.profit)} ({x.profit_pct:+.0%})",
                     "Buy link": x.buy.url, "Sell link": x.sell.url,
