@@ -18,13 +18,22 @@ from pathlib import Path
 _SRC = str(Path(__file__).parent / "src")
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
-# Purge stale copies only once per process. Streamlit re-executes this script on
-# every rerun; deleting modules each time races with imports in other
-# sessions/threads and raises KeyError inside importlib (_find_and_load).
-if not getattr(sys, "_blox_modules_purged", False):
+# Purge cached blox_trade_finder modules whenever the source on disk CHANGED (a
+# redeploy updates files inside the still-running process, so old modules would
+# otherwise stay in sys.modules and raise ImportError for new names). Keyed on a
+# fingerprint rather than "every run", so reruns don't race with imports.
+import hashlib
+
+_fp = hashlib.sha1()
+for _p in sorted(Path(_SRC).rglob("*.py")):
+    try:
+        _fp.update(_p.read_bytes())
+    except OSError:
+        pass
+if getattr(sys, "_blox_src_fp", None) != _fp.hexdigest():
     for _mod in [m for m in list(sys.modules) if m.startswith("blox_trade_finder")]:
         sys.modules.pop(_mod, None)
-    sys._blox_modules_purged = True
+    sys._blox_src_fp = _fp.hexdigest()
 
 import pandas as pd
 import streamlit as st
