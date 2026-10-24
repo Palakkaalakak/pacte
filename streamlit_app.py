@@ -1174,28 +1174,34 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
                     inventory_counts=_inv_counts(inventory) if arb_mine else None,
                 )
                 _trades = [x for x in _trades if not is_scam(x.profit, x.profit_pct, scam_cfg)]
-                st.session_state["arb_view2"] = {
-                    "gaps": item_gaps(_alist, min_ratio=arb_ratio), "trades": _trades, "ts": time.time(),
+                # Store plain dicts (not dataclass objects) so results saved by an older
+                # app version can never break the page after a redeploy.
+                st.session_state["arb_view3"] = {
+                    "gaps": [{
+                        "Item": g.name, "Gamersberg": format_value(g.gb_value),
+                        "bloxfruitsvalues": format_value(g.bfv_value),
+                        "Ratio": f"{g.ratio:.2f}x", "Higher on": g.higher_on, "Gap": format_value(g.gap),
+                    } for g in item_gaps(_alist, min_ratio=arb_ratio)[:300]],
+                    "trades": [{
+                        "Item": x.item,
+                        "Buy: you pay": ", ".join(i.name for i in x.buy.want),
+                        "Buy on": x.buy.source,
+                        "Sell: you get": ", ".join(i.name for i in x.sell.give),
+                        "Sell on": x.sell.source,
+                        "Oldest leg": f"{x.oldest_minutes:.0f}m",
+                        "Cost": format_value(x.cost), "Revenue": format_value(x.revenue),
+                        "Profit": f"{format_value(x.profit)} ({x.profit_pct:+.0%})",
+                        "Buy link": x.buy.url, "Sell link": x.sell.url,
+                    } for x in _trades[:300]],
                 }
             except Exception as exc:
                 st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
-    _arb = st.session_state.get("arb_view2")
+    _arb = st.session_state.get("arb_view3")
     if _arb:
         st.subheader(f"Arbitrage ({len(_arb['trades'])})")
         if _arb["trades"]:
             st.dataframe(
-                pd.DataFrame([{
-                    "Item": x.item,
-                    "Buy: you pay": ", ".join(i.name for i in x.buy.want),
-                    "Buy on": x.buy.source,
-                    "Sell: you get": ", ".join(i.name for i in x.sell.give),
-                    "Sell on": x.sell.source,
-                    "Oldest leg": f"{x.oldest_minutes:.0f}m",
-                    "Cost": format_value(x.cost), "Revenue": format_value(x.revenue),
-                    "Profit": f"{format_value(x.profit)} ({x.profit_pct:+.0%})",
-                    "Buy link": x.buy.url, "Sell link": x.sell.url,
-                } for x in _arb["trades"][:300]]),
-                use_container_width=True, hide_index=True,
+                pd.DataFrame(_arb["trades"]), use_container_width=True, hide_index=True,
                 column_config={
                     "Buy link": st.column_config.LinkColumn("Buy link"),
                     "Sell link": st.column_config.LinkColumn("Sell link"),
@@ -1205,14 +1211,7 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
             st.info("No same-item arbitrage right now.")
         st.subheader(f"Value gaps ({len(_arb['gaps'])})")
         if _arb["gaps"]:
-            st.dataframe(
-                pd.DataFrame([{
-                    "Item": g.name, "Gamersberg": format_value(g.gb_value),
-                    "bloxfruitsvalues": format_value(g.bfv_value),
-                    "Ratio": f"{g.ratio:.2f}x", "Higher on": g.higher_on, "Gap": format_value(g.gap),
-                } for g in _arb["gaps"][:300]]),
-                use_container_width=True, hide_index=True,
-            )
+            st.dataframe(pd.DataFrame(_arb["gaps"]), use_container_width=True, hide_index=True)
         else:
             st.info("No items with a big enough value gap in the data scanned.")
 
