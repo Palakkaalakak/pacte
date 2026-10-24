@@ -1137,20 +1137,20 @@ with st.expander(t("chain_header"), expanded=False):
 # ---------------------------------------------------------------- arbitrage
 with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
     st.write(
-        "Compares the two sites' values. **Value gaps** lists items they price differently. "
-        "**Gap trades** re-values every live listing under BOTH sites' numbers: ✅ means it profits "
-        "on both (consensus), ⚡ means it only profits on one site's numbers — you receive items "
-        "the other site values higher, so you can flip them there."
+        "Same-item arbitrage: buy item X from one listing and sell the same X to another for more "
+        "(both legs valued on one common basis, ideally across the two sites). **Value gaps** lists "
+        "items the two sites price differently."
     )
     arb_pct = st.number_input("Min profit % (on either site's values)", 0, None, 10, step=5, key="arb_pct")
     arb_ratio = st.number_input("Min item value ratio for the gap table (x)", 1.0, None, 1.25, step=0.05, key="arb_ratio")
-    arb_cons = st.checkbox("Consensus only (profit on both sites)", value=False, key="arb_cons")
+    arb_cross = st.checkbox("Cross-site only (buy on one site, sell on the other)", value=True, key="arb_cross")
+    arb_basis = st.selectbox("Value basis for profit", ["gamersberg", "bloxfruitsvalues"], key="arb_basis")
     arb_mine = st.checkbox("Only trades I can make with my inventory", value=True, key="arb_mine")
     if st.button("⚖️ Find Arbitrage", use_container_width=True, key="arb_btn"):
         if not inventory.items:
             st.warning(t("need_item_warning"))
         else:
-            from blox_trade_finder.core.arbitrage import find_gap_trades, item_gaps
+            from blox_trade_finder.core.arbitrage import find_item_arbitrage, item_gaps
             from blox_trade_finder.core.normalize import inventory_counts as _inv_counts
             from blox_trade_finder.live import has_blocked_item, is_scam
             try:
@@ -1165,12 +1165,11 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
                         )
                     _alist = _ares.listings
                 _alist = filter_listings(_alist, scam_cfg)
-                _trades = find_gap_trades(
-                    _alist, min_pct=arb_pct / 100, require_consensus=arb_cons,
+                _trades = find_item_arbitrage(
+                    _alist, value_basis=arb_basis, min_pct=arb_pct / 100, cross_site_only=arb_cross,
                     inventory_counts=_inv_counts(inventory) if arb_mine else None,
                 )
-                _trades = [x for x in _trades if not is_scam(x.profit_gb, x.pct_gb, scam_cfg) or not is_scam(x.profit_bfv, x.pct_bfv, scam_cfg)]
-                _trades = [x for x in _trades if not (scam_cfg.get("max_profit_pct") and x.best_pct > scam_cfg["max_profit_pct"])]
+                _trades = [x for x in _trades if not is_scam(x.profit, x.profit_pct, scam_cfg)]
                 st.session_state["arb_view"] = {
                     "gaps": item_gaps(_alist, min_ratio=arb_ratio), "trades": _trades, "ts": time.time(),
                 }
@@ -1178,25 +1177,27 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
                 st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
     _arb = st.session_state.get("arb_view")
     if _arb:
-        st.subheader(f"Gap trades ({len(_arb['trades'])})")
+        st.subheader(f"Arbitrage ({len(_arb['trades'])})")
         if _arb["trades"]:
             st.dataframe(
                 pd.DataFrame([{
-                    "": "✅" if x.consensus else "⚡",
-                    "You give": ", ".join(i.name for i in x.listing.want),
-                    "You get": ", ".join(i.name for i in x.listing.give),
-                    "Gamersberg": f"{format_value(x.profit_gb)} ({x.pct_gb:+.0%})",
-                    "bloxfruitsvalues": f"{format_value(x.profit_bfv)} ({x.pct_bfv:+.0%})",
-                    "Edge on": x.edge_site,
-                    "Source": x.listing.source,
-                    t("col_posted"): _posted_ago(x.listing.created_at),
-                    t("col_link"): x.listing.url,
+                    "Item": x.item,
+                    "Buy: you pay": ", ".join(i.name for i in x.buy.want),
+                    "Buy on": x.buy.source,
+                    "Sell: you get": ", ".join(i.name for i in x.sell.give),
+                    "Sell on": x.sell.source,
+                    "Cost": format_value(x.cost), "Revenue": format_value(x.revenue),
+                    "Profit": f"{format_value(x.profit)} ({x.profit_pct:+.0%})",
+                    "Buy link": x.buy.url, "Sell link": x.sell.url,
                 } for x in _arb["trades"][:300]]),
                 use_container_width=True, hide_index=True,
-                column_config={t("col_link"): st.column_config.LinkColumn(t("col_link"))},
+                column_config={
+                    "Buy link": st.column_config.LinkColumn("Buy link"),
+                    "Sell link": st.column_config.LinkColumn("Sell link"),
+                },
             )
         else:
-            st.info("No cross-site gap trades right now.")
+            st.info("No same-item arbitrage right now.")
         st.subheader(f"Value gaps ({len(_arb['gaps'])})")
         if _arb["gaps"]:
             st.dataframe(

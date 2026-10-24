@@ -1,11 +1,9 @@
 """Cross-site arbitrage: Gamersberg vs bloxfruitsvalues.com disagree on values.
 
-Two views of the same discrepancy:
-  * item_gaps       – items the two sites price differently (ratio + absolute gap).
-  * find_gap_trades – live listings valued under BOTH sites' numbers. A trade that
-                      profits under both is a consensus win; one that profits under
-                      only one site's numbers is a valuation-gap trade (you receive
-                      items the other site prices higher, so you can flip them there).
+Arbitrage is about the SAME item:
+  * item_gaps           – items the two sites price differently (ratio + absolute gap).
+  * find_item_arbitrage – buy item X in one listing, sell X in another for more
+                          (priced on one common basis), ideally across the two sites.
 
 Gamersberg items carry only Gamersberg values; bloxfruitsvalues items carry their
 own number (plus Gamersberg's when the name matches). `bfv_value_map` harvests every
@@ -42,40 +40,25 @@ class ItemGap:
 
 
 @dataclass
-class GapTrade:
-    listing: Listing
-    give_gb: int
-    get_gb: int
-    give_bfv: int
-    get_bfv: int
+class ItemArb:
+    """Buy item X in one listing, sell the SAME item X in another."""
+    item: str
+    buy: Listing      # gives X, wants `pay` items
+    sell: Listing     # wants X, gives `receive` items
+    cost: int         # value of what you pay for X (buy.want)
+    revenue: int      # value of what you receive for X (sell.give)
 
     @property
-    def profit_gb(self) -> int:
-        return self.get_gb - self.give_gb
+    def profit(self) -> int:
+        return self.revenue - self.cost
 
     @property
-    def profit_bfv(self) -> int:
-        return self.get_bfv - self.give_bfv
+    def profit_pct(self) -> float:
+        return self.profit / self.cost if self.cost else 0.0
 
     @property
-    def pct_gb(self) -> float:
-        return self.profit_gb / self.give_gb if self.give_gb else 0.0
-
-    @property
-    def pct_bfv(self) -> float:
-        return self.profit_bfv / self.give_bfv if self.give_bfv else 0.0
-
-    @property
-    def consensus(self) -> bool:
-        return self.profit_gb > 0 and self.profit_bfv > 0
-
-    @property
-    def best_pct(self) -> float:
-        return max(self.pct_gb, self.pct_bfv)
-
-    @property
-    def edge_site(self) -> str:
-        return "Gamersberg" if self.pct_gb >= self.pct_bfv else "bloxfruitsvalues"
+    def cross_site(self) -> bool:
+        return self.buy.source != self.sell.source
 
 
 def bfv_value_map(listings: list[Listing]) -> dict[str, int]:
@@ -112,35 +95,61 @@ def item_gaps(listings: list[Listing], *, min_ratio: float = 1.25, min_gap: int 
     return gaps
 
 
-def find_gap_trades(
+def find_item_arbitrage(
     listings: list[Listing],
     *,
+    value_basis: str = GB,
     min_pct: float = 0.10,
-    require_consensus: bool = False,
+    cross_site_only: bool = True,
     inventory_counts: Counter[str] | None = None,
-) -> list[GapTrade]:
-    """You give `listing.want`, you get `listing.give`. Both sites' numbers must
-    exist for every item (otherwise we can't compare). Best (highest min-profit) first."""
+    per_item: int = 5,
+) -> list[ItemArb]:
+    """Same-item arbitrage. For every item X: a listing that GIVES exactly one X
+    (the buy) paired with a listing that WANTS exactly one X (the sell). You pay the
+    buy listing's `want`, receive the sell listing's `give`; X passes straight through.
+    Both legs are valued with ONE common basis so the profit is real, not a valuation
+    artifact. `inventory_counts` restricts buys to ones you can pay for."""
     bfv_map = bfv_value_map(listings)
-    out: list[GapTrade] = []
+
+    def val(items: list[CatalogItem]) -> int:
+        if value_basis == BFV:
+            return sum(_bfv_value(i, bfv_map) for i in items)
+        return sum(i.values.get(value_basis, 0) for i in items)
+
+    buys: dict[str, list[Listing]] = {}
+    sells: dict[str, list[Listing]] = {}
     for lst in listings:
         if not lst.give or not lst.want:
             continue
-        if inventory_counts is not None:
-            need = Counter(i.name.lower() for i in lst.want)
-            if any(inventory_counts.get(n, 0) < q for n, q in need.items()):
+        if len(lst.give) == 1:
+            buys.setdefault(lst.give[0].name.lower(), []).append(lst)
+        if len(lst.want) == 1:
+            sells.setdefault(lst.want[0].name.lower(), []).append(lst)
+
+    out: list[ItemArb] = []
+    for key, buy_list in buys.items():
+        for sell in sells.get(key, []):
+            revenue = val(sell.give)
+            if revenue <= 0:
                 continue
-        give_gb = sum(_gb_value(i) for i in lst.want)
-        get_gb = sum(_gb_value(i) for i in lst.give)
-        give_bfv = sum(_bfv_value(i, bfv_map) for i in lst.want)
-        get_bfv = sum(_bfv_value(i, bfv_map) for i in lst.give)
-        if min(give_gb, get_gb, give_bfv, get_bfv) <= 0 or any(
-            _gb_value(i) <= 0 or _bfv_value(i, bfv_map) <= 0 for i in (*lst.give, *lst.want)
-        ):
-            continue
-        t = GapTrade(lst, give_gb, get_gb, give_bfv, get_bfv)
-        if t.best_pct < min_pct or (require_consensus and not t.consensus):
-            continue
-        out.append(t)
-    out.sort(key=lambda t: (-(t.consensus), -min(t.pct_gb, t.pct_bfv), -t.best_pct))
-    return out
+            for buy in buy_list:
+                if buy is sell or (cross_site_only and buy.source == sell.source):
+                    continue
+                if inventory_counts is not None:
+                    need = Counter(i.name.lower() for i in buy.want)
+                    if any(inventory_counts.get(n, 0) < q for n, q in need.items()):
+                        continue
+                cost = val(buy.want)
+                if cost <= 0:
+                    continue
+                arb = ItemArb(buy.give[0].name, buy, sell, cost, revenue)
+                if arb.profit > 0 and arb.profit_pct >= min_pct:
+                    out.append(arb)
+    out.sort(key=lambda a: -a.profit_pct)
+    counts: Counter[str] = Counter()
+    capped = []
+    for a in out:  # keep the best few per item so one popular item doesn't flood the table
+        if counts[a.item] < per_item:
+            counts[a.item] += 1
+            capped.append(a)
+    return capped

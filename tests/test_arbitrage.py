@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from blox_trade_finder.core.arbitrage import find_gap_trades, item_gaps
+from blox_trade_finder.core.arbitrage import find_item_arbitrage, item_gaps
 from blox_trade_finder.models import CatalogItem, Listing
 
 
@@ -8,9 +8,12 @@ def _it(name, gb, bfv, i=1):
     return CatalogItem(id=i, name=name, values={"gamersberg": gb, "bloxfruitsvalues": bfv})
 
 
-def _l(id_, want, give):
-    return Listing(id=id_, source="gamersberg", url="u", poster_name="p", poster_rating=1.0,
+def _l(id_, want, give, source="gamersberg"):
+    return Listing(id=id_, source=source, url="u", poster_name="p", poster_rating=1.0,
                    give=give, want=want, wfl={}, created_at=datetime.now(timezone.utc))
+
+
+X = _it("X", 100, 100, 1)
 
 
 def test_item_gaps_ranks_by_gap() -> None:
@@ -19,10 +22,17 @@ def test_item_gaps_ranks_by_gap() -> None:
     assert [g.name for g in gaps] == ["B"] and gaps[0].higher_on == "bloxfruitsvalues"
 
 
-def test_gap_trade_consensus_and_single_site() -> None:
-    cons = _l("c", [_it("A", 10, 10)], [_it("B", 15, 14, 2)])      # wins on both
-    gap = _l("g", [_it("A", 10, 10)], [_it("C", 9, 20, 3)])        # wins only on bfv
-    none = _l("n", [_it("A", 10, 10)], [_it("D", 9, 9, 4)])         # loses on both
-    res = find_gap_trades([cons, gap, none], min_pct=0.1)
-    assert [t.listing.id for t in res] == ["c", "g"]
-    assert res[0].consensus and not res[1].consensus and res[1].edge_site == "bloxfruitsvalues"
+def test_same_item_arbitrage_cross_site() -> None:
+    buy = _l("buy", [_it("W", 80, 80, 2)], [X], source="bloxfruitsvalues")   # pay 80 for X
+    sell = _l("sell", [X], [_it("G", 120, 120, 3)], source="gamersberg")     # get 120 for X
+    res = find_item_arbitrage([buy, sell], min_pct=0.1)
+    assert len(res) == 1 and res[0].profit == 40 and res[0].cross_site and res[0].item == "X"
+
+
+def test_same_site_excluded_by_default_and_no_loss() -> None:
+    buy = _l("buy", [_it("W", 80, 80, 2)], [X])
+    sell = _l("sell", [X], [_it("G", 120, 120, 3)])
+    assert find_item_arbitrage([buy, sell]) == []
+    assert len(find_item_arbitrage([buy, sell], cross_site_only=False)) == 1
+    bad = _l("bad", [X], [_it("G", 50, 50, 4)], source="bloxfruitsvalues")
+    assert find_item_arbitrage([buy, bad], cross_site_only=True) == []
