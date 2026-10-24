@@ -30,7 +30,7 @@ import pandas as pd
 import streamlit as st
 
 from blox_trade_finder.models import Goals, Inventory, InventoryEntry
-from blox_trade_finder.live import NOTIFY_MAX_AGE_MINUTES, LiveWorker, DEFAULT_BLOCKED_ITEMS, build_view, filter_chains, filter_listings
+from blox_trade_finder.live import build_arb_view, NOTIFY_MAX_AGE_MINUTES, LiveWorker, DEFAULT_BLOCKED_ITEMS, build_view, filter_chains, filter_listings
 from blox_trade_finder.scan import ScanProgress, run_scan
 from blox_trade_finder.sources.gamersberg import GamersbergSource
 from blox_trade_finder.ui.table import format_value
@@ -630,6 +630,33 @@ def _play_alarm(count: int) -> None:
     components.html(_alarm_html(count), height=80)
 
 
+# --- stale session guard -------------------------------------------------------
+# Session state outlives a redeploy; objects saved by an older version of the code
+# (workers, dataclasses) then raise AttributeError on newer fields. Fingerprint the
+# code and wipe every saved result/worker whenever it changes.
+def _code_fingerprint() -> str:
+    import hashlib
+    h = hashlib.sha1()
+    for path in [Path(__file__), *sorted((Path(__file__).parent / "src").rglob("*.py"))]:
+        try:
+            h.update(path.read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()
+
+
+if st.session_state.get("_code_fp") != _code_fingerprint():
+    _old_worker = st.session_state.get("live_worker")
+    try:
+        if _old_worker is not None:
+            _old_worker.stop()
+    except Exception:
+        pass
+    for _k in ("live_worker", "last_view", "last_listings", "chain_view", "chain_view_ts",
+               "arb_view3", "seen_listing_ids", "alarm_html", "alarm_until", "alarm_seq_played"):
+        st.session_state.pop(_k, None)
+    st.session_state["_code_fp"] = _code_fingerprint()
+
 st.set_page_config(page_title="Blox Fruits Trade Finder", page_icon="🍈", layout="centered")
 
 # ------------------------------------------------------------------ language
@@ -901,6 +928,15 @@ def _chain_cfg() -> dict:
     )
 
 
+def _arb_cfg() -> dict:
+    ss = st.session_state
+    return dict(
+        value_basis=ss.get("arb_basis", "gamersberg"), min_pct=ss.get("arb_pct", 10) / 100,
+        cross_site_only=ss.get("arb_cross", True), max_age_minutes=ss.get("arb_age", 10) or None,
+        min_ratio=ss.get("arb_ratio", 1.25), only_mine=ss.get("arb_mine", True),
+    )
+
+
 worker: LiveWorker | None = st.session_state.get("live_worker")
 if live_mode and inventory.items:
     if worker is None or not worker.alive:
@@ -909,6 +945,7 @@ if live_mode and inventory.items:
             max_age_minutes=st.session_state.get("max_age_min") or None, scam_cfg=scam_cfg,
             notify_age_minutes=_notify_age or None,
             chain_cfg=_chain_cfg() if st.session_state.get("chain_auto") else None,
+            arb_cfg=_arb_cfg() if st.session_state.get("arb_auto") else None,
             interval_seconds=live_interval, gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
         )
         worker.start()
@@ -921,6 +958,7 @@ if live_mode and inventory.items:
         worker.max_age_minutes = st.session_state.get("max_age_min") or None
         worker.notify_age_minutes = _notify_age or None
         worker.chain_cfg = _chain_cfg() if st.session_state.get("chain_auto") else None
+        worker.arb_cfg = _arb_cfg() if st.session_state.get("arb_auto") else None
 elif worker is not None:
     worker.stop()
     st.session_state.pop("live_worker", None)
@@ -1150,13 +1188,12 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
     arb_cross = st.checkbox("Cross-site only (buy on one site, sell on the other)", value=True, key="arb_cross")
     arb_basis = st.selectbox("Value basis for profit", ["gamersberg", "bloxfruitsvalues"], key="arb_basis")
     arb_mine = st.checkbox("Only trades I can make with my inventory", value=True, key="arb_mine")
+    st.checkbox("🔁 Also search arbitrage on every live scan (runs alongside the live checker)", value=False, key="arb_auto")
     if st.button("⚖️ Find Arbitrage", use_container_width=True, key="arb_btn"):
         if not inventory.items:
             st.warning(t("need_item_warning"))
         else:
-            from blox_trade_finder.core.arbitrage import find_item_arbitrage, item_gaps
             from blox_trade_finder.core.normalize import inventory_counts as _inv_counts
-            from blox_trade_finder.live import has_blocked_item, is_scam
             try:
                 cached = (worker.snapshot()["listings"] if worker is not None else None) or st.session_state.get("last_listings")
                 if cached and time.time() - cached[0] < LIVE_SCAN_INTERVAL_SECONDS and set(selected_sources) == {"gamersberg", "bloxfruitsvalues"}:
@@ -1168,36 +1205,17 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
                             deep=True, gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
                         )
                     _alist = _ares.listings
-                _alist = filter_listings(_alist, scam_cfg)
-                _trades = find_item_arbitrage(
-                    _alist, value_basis=arb_basis, min_pct=arb_pct / 100, cross_site_only=arb_cross, max_age_minutes=arb_age or None,
-                    inventory_counts=_inv_counts(inventory) if arb_mine else None,
+                st.session_state["arb_view3"] = build_arb_view(
+                    _alist, cfg=_arb_cfg(), inventory_counts=_inv_counts(inventory), scam_cfg=scam_cfg,
                 )
-                _trades = [x for x in _trades if not is_scam(x.profit, x.profit_pct, scam_cfg)]
-                # Store plain dicts (not dataclass objects) so results saved by an older
-                # app version can never break the page after a redeploy.
-                st.session_state["arb_view3"] = {
-                    "gaps": [{
-                        "Item": g.name, "Gamersberg": format_value(g.gb_value),
-                        "bloxfruitsvalues": format_value(g.bfv_value),
-                        "Ratio": f"{g.ratio:.2f}x", "Higher on": g.higher_on, "Gap": format_value(g.gap),
-                    } for g in item_gaps(_alist, min_ratio=arb_ratio)[:300]],
-                    "trades": [{
-                        "Item": x.item,
-                        "Buy: you pay": ", ".join(i.name for i in x.buy.want),
-                        "Buy on": x.buy.source,
-                        "Sell: you get": ", ".join(i.name for i in x.sell.give),
-                        "Sell on": x.sell.source,
-                        "Oldest leg": f"{x.oldest_minutes:.0f}m",
-                        "Cost": format_value(x.cost), "Revenue": format_value(x.revenue),
-                        "Profit": f"{format_value(x.profit)} ({x.profit_pct:+.0%})",
-                        "Buy link": x.buy.url, "Sell link": x.sell.url,
-                    } for x in _trades[:300]],
-                }
             except Exception as exc:
                 st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
-    _arb = st.session_state.get("arb_view3")
-    if _arb:
+    def _arb_panel() -> None:
+        snap = worker.snapshot() if worker is not None else None
+        cands = [v for v in (st.session_state.get("arb_view3"), snap["arb"] if snap else None) if v]
+        if not cands:
+            return
+        _arb = max(cands, key=lambda v: v["ts"])
         st.subheader(f"Arbitrage ({len(_arb['trades'])})")
         if _arb["trades"]:
             st.dataframe(
@@ -1214,6 +1232,8 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
             st.dataframe(pd.DataFrame(_arb["gaps"]), use_container_width=True, hide_index=True)
         else:
             st.info("No items with a big enough value gap in the data scanned.")
+
+    st.fragment(run_every=3 if worker is not None else None)(_arb_panel)()
 
 # ------------------------------------------------------------------ watcher
 with st.expander(t("watcher_header")):

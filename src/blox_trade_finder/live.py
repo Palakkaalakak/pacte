@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 from typing import Callable
 
+from blox_trade_finder.core.arbitrage import find_item_arbitrage, item_gaps
 from blox_trade_finder.core.chains import find_chains
 from blox_trade_finder.core.normalize import inventory_counts
 from blox_trade_finder.models import Goals, Inventory, Match
@@ -129,6 +130,37 @@ def build_view(
     return view, new_seen
 
 
+def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dict | None) -> dict:
+    """Arbitrage results as PLAIN rows (dicts/strings only). Plain data can never
+    break the page after a redeploy changes a class, unlike stored objects."""
+    listings = filter_listings(listings, scam_cfg)
+    trades = find_item_arbitrage(
+        listings, value_basis=cfg["value_basis"], min_pct=cfg["min_pct"],
+        cross_site_only=cfg["cross_site_only"], max_age_minutes=cfg["max_age_minutes"],
+        inventory_counts=inventory_counts if cfg["only_mine"] else None,
+    )
+    trades = [x for x in trades if not is_scam(x.profit, x.profit_pct, scam_cfg)]
+    return {
+        "ts": time.time(),
+        "gaps": [{
+            "Item": g.name, "Gamersberg": format_value(g.gb_value),
+            "bloxfruitsvalues": format_value(g.bfv_value),
+            "Ratio": f"{g.ratio:.2f}x", "Higher on": g.higher_on, "Gap": format_value(g.gap),
+        } for g in item_gaps(listings, min_ratio=cfg["min_ratio"])[:300]],
+        "trades": [{
+            "Item": x.item,
+            "Buy: you pay": ", ".join(i.name for i in x.buy.want),
+            "Buy on": x.buy.source,
+            "Sell: you get": ", ".join(i.name for i in x.sell.give),
+            "Sell on": x.sell.source,
+            "Oldest leg": f"{x.oldest_minutes:.0f}m",
+            "Cost": format_value(x.cost), "Revenue": format_value(x.revenue),
+            "Profit": f"{format_value(x.profit)} ({x.profit_pct:+.0%})",
+            "Buy link": x.buy.url, "Sell link": x.sell.url,
+        } for x in trades[:300]],
+    }
+
+
 class LiveWorker:
     def __init__(
         self,
@@ -141,6 +173,7 @@ class LiveWorker:
         max_age_minutes: float | None,
         notify_age_minutes: float | None = NOTIFY_MAX_AGE_MINUTES,
         chain_cfg: dict | None,
+        arb_cfg: dict | None = None,
         interval_seconds: int = 300,
         gb_max_pages: int | None = None,
         idle_timeout_seconds: int = 900,
@@ -149,6 +182,7 @@ class LiveWorker:
         self.inventory, self.goals, self.sources = inventory, goals, sources
         self.notify_cfg, self.max_age_minutes, self.chain_cfg = notify_cfg, max_age_minutes, chain_cfg
         self.scam_cfg = scam_cfg
+        self.arb_cfg = arb_cfg
         self.notify_age_minutes = notify_age_minutes
         self.interval, self.gb_max_pages = interval_seconds, gb_max_pages
         self.idle_timeout, self._scan_fn = idle_timeout_seconds, scan_fn
@@ -160,7 +194,7 @@ class LiveWorker:
         self.state: dict = {
             "view": None, "chains": None, "chains_ts": 0.0, "scans": 0, "alarm_seq": 0,
             "alarm_hits": 0, "last_scan_ts": None, "scanning": False, "error": None,
-            "listings": None,
+            "listings": None, "arb": None,
         }
 
     def start(self) -> None:
@@ -196,7 +230,15 @@ class LiveWorker:
                 chains = filter_chains(
                     find_chains(filter_listings(result.listings, self.scam_cfg), inventory_counts(self.inventory), **self.chain_cfg), self.scam_cfg
                 )
+            arb = None
+            if self.arb_cfg is not None:
+                arb = build_arb_view(
+                    result.listings, cfg=self.arb_cfg, inventory_counts=inventory_counts(self.inventory),
+                    scam_cfg=self.scam_cfg,
+                )
             with self._lock:
+                if arb is not None:
+                    self.state["arb"] = arb
                 self.state.update(
                     view=view, scans=self.state["scans"] + 1, last_scan_ts=time.time(),
                     error=None, listings=(time.time(), result.listings),
