@@ -1134,6 +1134,82 @@ with st.expander(t("chain_header"), expanded=False):
 
     st.fragment(run_every=3 if worker is not None else None)(_chain_panel)()
 
+# ---------------------------------------------------------------- arbitrage
+with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
+    st.write(
+        "Compares the two sites' values. **Value gaps** lists items they price differently. "
+        "**Gap trades** re-values every live listing under BOTH sites' numbers: ✅ means it profits "
+        "on both (consensus), ⚡ means it only profits on one site's numbers — you receive items "
+        "the other site values higher, so you can flip them there."
+    )
+    arb_pct = st.number_input("Min profit % (on either site's values)", 0, None, 10, step=5, key="arb_pct")
+    arb_ratio = st.number_input("Min item value ratio for the gap table (x)", 1.0, None, 1.25, step=0.05, key="arb_ratio")
+    arb_cons = st.checkbox("Consensus only (profit on both sites)", value=False, key="arb_cons")
+    arb_mine = st.checkbox("Only trades I can make with my inventory", value=True, key="arb_mine")
+    if st.button("⚖️ Find Arbitrage", use_container_width=True, key="arb_btn"):
+        if not inventory.items:
+            st.warning(t("need_item_warning"))
+        else:
+            from blox_trade_finder.core.arbitrage import find_gap_trades, item_gaps
+            from blox_trade_finder.core.normalize import inventory_counts as _inv_counts
+            from blox_trade_finder.live import has_blocked_item, is_scam
+            try:
+                cached = (worker.snapshot()["listings"] if worker is not None else None) or st.session_state.get("last_listings")
+                if cached and time.time() - cached[0] < LIVE_SCAN_INTERVAL_SECONDS and set(selected_sources) == {"gamersberg", "bloxfruitsvalues"}:
+                    _alist = cached[1]
+                else:
+                    with st.spinner(t("progress_start")):
+                        _ares = run_scan(
+                            inventory, Goals(any=True), sources=["gamersberg", "bloxfruitsvalues"],
+                            deep=True, gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
+                        )
+                    _alist = _ares.listings
+                _alist = filter_listings(_alist, scam_cfg)
+                _trades = find_gap_trades(
+                    _alist, min_pct=arb_pct / 100, require_consensus=arb_cons,
+                    inventory_counts=_inv_counts(inventory) if arb_mine else None,
+                )
+                _trades = [x for x in _trades if not is_scam(x.profit_gb, x.pct_gb, scam_cfg) or not is_scam(x.profit_bfv, x.pct_bfv, scam_cfg)]
+                _trades = [x for x in _trades if not (scam_cfg.get("max_profit_pct") and x.best_pct > scam_cfg["max_profit_pct"])]
+                st.session_state["arb_view"] = {
+                    "gaps": item_gaps(_alist, min_ratio=arb_ratio), "trades": _trades, "ts": time.time(),
+                }
+            except Exception as exc:
+                st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
+    _arb = st.session_state.get("arb_view")
+    if _arb:
+        st.subheader(f"Gap trades ({len(_arb['trades'])})")
+        if _arb["trades"]:
+            st.dataframe(
+                pd.DataFrame([{
+                    "": "✅" if x.consensus else "⚡",
+                    "You give": ", ".join(i.name for i in x.listing.want),
+                    "You get": ", ".join(i.name for i in x.listing.give),
+                    "Gamersberg": f"{format_value(x.profit_gb)} ({x.pct_gb:+.0%})",
+                    "bloxfruitsvalues": f"{format_value(x.profit_bfv)} ({x.pct_bfv:+.0%})",
+                    "Edge on": x.edge_site,
+                    "Source": x.listing.source,
+                    t("col_posted"): _posted_ago(x.listing.created_at),
+                    t("col_link"): x.listing.url,
+                } for x in _arb["trades"][:300]]),
+                use_container_width=True, hide_index=True,
+                column_config={t("col_link"): st.column_config.LinkColumn(t("col_link"))},
+            )
+        else:
+            st.info("No cross-site gap trades right now.")
+        st.subheader(f"Value gaps ({len(_arb['gaps'])})")
+        if _arb["gaps"]:
+            st.dataframe(
+                pd.DataFrame([{
+                    "Item": g.name, "Gamersberg": format_value(g.gb_value),
+                    "bloxfruitsvalues": format_value(g.bfv_value),
+                    "Ratio": f"{g.ratio:.2f}x", "Higher on": g.higher_on, "Gap": format_value(g.gap),
+                } for g in _arb["gaps"][:300]]),
+                use_container_width=True, hide_index=True,
+            )
+        else:
+            st.info("No items with a big enough value gap in the data scanned.")
+
 # ------------------------------------------------------------------ watcher
 with st.expander(t("watcher_header")):
     st.write(t("watcher_intro"))
