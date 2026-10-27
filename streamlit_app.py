@@ -757,6 +757,50 @@ else:
             else:
                 st.warning(t("save_needs_name_items"))
 
+# ------------------------------------------------------------ account value
+@st.cache_resource(ttl=600)
+def _catalog_cached():
+    source = GamersbergSource()
+    try:
+        return source.fetch_catalog(fresh=False)
+    finally:
+        source.close()
+
+
+with st.expander("💰 Account value"):
+    st.caption("Values the inventory chosen above (preset or your own).")
+    if not inventory.items:
+        st.info(t("need_item_warning"))
+    else:
+        from blox_trade_finder.core.valuation import value_inventory
+        _av_basis = st.selectbox(
+            "Value source", ["gamersberg", "fruityblox", "bloxfruit", "average"],
+            format_func=lambda b: "Average of all sources" if b == "average" else VALUE_BASIS_LABELS[b],
+            key="av_basis",
+        )
+        try:
+            _rows = value_inventory(inventory, _catalog_cached(), _av_basis)
+        except Exception as exc:
+            _rows = None
+            st.error(t("catalog_failed", error=f"{type(exc).__name__}: {exc}"))
+        if _rows is not None:
+            _total = sum(r.total for r in _rows)
+            st.metric("Total account value", format_value(_total))
+            st.caption(f"{sum(r.qty for r in _rows)} item(s), {len(_rows)} unique. "
+                       f"Raw total: {_total:,}")
+            st.dataframe(
+                pd.DataFrame([{
+                    "Item": r.name, "Qty": r.qty,
+                    "Each": format_value(r.unit) if r.known else "?",
+                    "Total": format_value(r.total) if r.known else "?",
+                    "Share": f"{r.total / _total:.0%}" if _total and r.known else "",
+                } for r in _rows]),
+                use_container_width=True, hide_index=True,
+            )
+            _unknown = [r.name for r in _rows if not r.known]
+            if _unknown:
+                st.warning("No value found for: " + ", ".join(_unknown) + " (counted as 0).")
+
 # -------------------------------------------------------------------- goals
 st.header(t("header_goals"))
 goals_mode = st.radio(
