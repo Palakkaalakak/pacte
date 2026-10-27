@@ -1,12 +1,15 @@
 {
   "items": [
     { "name": "Green Lightning", "qty": 2 },
+    { "name": "Venom", "qty": 3 },
+    { "name": "Shadow", "qty": 2 },
     { "name": "Torment Pain", "qty": 3 },
     { "name": "Emerald Diamond", "qty": 1 },
     { "name": "Glacier Eagle", "qty": 3 },
     { "name": "Rose Quartz Diamond", "qty": 3 },
     { "name": "Gravity", "qty": 3 },
     { "name": "Tiger", "qty": 1 },
+    { "name": "Blizzard", "qty": 1 },
     { "name": "Yeti", "qty": 1 },
     { "name": "T-Rex", "qty": 1 },
     { "name": "Dough", "qty": 1 },
