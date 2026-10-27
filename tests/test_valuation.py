@@ -25,3 +25,10 @@ def test_value_inventory_totals_and_unknown() -> None:
 def test_average_basis() -> None:
     assert item_unit_value({"gamersberg": 100, "fruityblox": 50}, "average") == 75
     assert item_unit_value({}, "average") == 0
+
+
+def test_catalog_name_with_trailing_space() -> None:
+    cat = Catalog(items=[CatalogItem(id=3, name="Scarlet Ghost ", values={"gamersberg": 40})],
+                  version=1, fetched_at=datetime.now(timezone.utc))
+    rows = value_inventory(Inventory(items=[InventoryEntry(name="Scarlet Ghost")]), cat)
+    assert rows[0].known and rows[0].total == 40

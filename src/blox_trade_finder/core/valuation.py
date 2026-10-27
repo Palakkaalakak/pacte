@@ -30,7 +30,8 @@ def item_unit_value(values: dict[str, int], basis: str) -> int:
 
 
 def value_inventory(inventory: Inventory, catalog: Catalog, basis: str = "gamersberg") -> list[ValuedItem]:
-    by_name = catalog.by_name
+    # Catalog names can carry stray whitespace (e.g. "Scarlet Ghost "), so key on stripped names.
+    by_name = {i.name.strip().lower(): i for i in catalog.items}
     merged: dict[str, ValuedItem] = {}
     for entry in inventory.items:
         name = resolved_inventory_name(entry)
