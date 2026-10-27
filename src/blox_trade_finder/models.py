@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 ValueBasis = Literal["gamersberg", "fruityblox", "bloxfruit", "bloxfruitsvalues"]
 
@@ -32,6 +32,13 @@ class CatalogItem(BaseModel):
     # scrolls) — those don't count toward the game's 40% trade-balance rule.
     beli_price: int = 0
     image: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        # Gamersberg ships some names with stray whitespace ("Scarlet Ghost ");
+        # normalise so both spellings match everywhere names are compared.
+        return v.strip()
 
     def value(self, basis: ValueBasis) -> int:
         """Value for `basis`, falling back to any other populated source if the

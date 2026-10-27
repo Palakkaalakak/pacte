@@ -32,3 +32,14 @@ def test_catalog_name_with_trailing_space() -> None:
                   version=1, fetched_at=datetime.now(timezone.utc))
     rows = value_inventory(Inventory(items=[InventoryEntry(name="Scarlet Ghost")]), cat)
     assert rows[0].known and rows[0].total == 40
+
+
+def test_both_spellings_match_everywhere() -> None:
+    from blox_trade_finder.core.normalize import check_inventory_names, inventory_counts
+    cat = Catalog(items=[CatalogItem(id=3, name="Scarlet Ghost ", values={"gamersberg": 40})],
+                  version=1, fetched_at=datetime.now(timezone.utc))
+    assert cat.items[0].name == "Scarlet Ghost"
+    for spelling in ("Scarlet Ghost", "Scarlet Ghost ", " scarlet ghost"):
+        inv = Inventory(items=[InventoryEntry(name=spelling)])
+        assert check_inventory_names(inv, cat) == []
+        assert inventory_counts(inv)["scarlet ghost"] == 1

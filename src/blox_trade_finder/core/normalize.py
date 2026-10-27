@@ -100,10 +100,11 @@ def resolved_inventory_name(entry: InventoryEntry) -> str:
     both values attached to the same entry, and don't say which one a given
     trade actually offers. This prefixing only ever changes which name is
     matched against Gamersberg-sourced listings."""
+    name = entry.name.strip()  # "Scarlet Ghost " and "Scarlet Ghost" are the same item
     variant = (entry.variant or "").strip().lower()
-    if variant == "permanent" and not entry.name.lower().startswith("permanent "):
-        return f"Permanent {entry.name}"
-    return entry.name
+    if variant == "permanent" and not name.lower().startswith("permanent "):
+        return f"Permanent {name}"
+    return name
 
 
 def inventory_counts(inventory: Inventory) -> Counter[str]:
