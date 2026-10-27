@@ -1,8 +1,10 @@
 {
   "items": [
-    { "name": "Portal", "qty": 1 },
-    { "name": "Spirit", "qty": 1 },
+    { "name": "Venom", "qty": 1 },
+    { "name": "Shadow", "qty": 1 },
     { "name": "Gravity", "qty": 1 },
+    { "name": "T-Rex", "qty": 1 },
+    { "name": "Dough", "qty": 1 },
     { "name": "Yeti", "qty": 1 }
   ]
 }
