@@ -40,9 +40,15 @@ def notify_reason(match: Match, cfg: dict, max_age_minutes: float | None = NOTIF
     if max_age_minutes and (datetime.now(timezone.utc) - _aware(match.listing.created_at)).total_seconds() > max_age_minutes * 60:
         return None
     wanted = [_name_words(n) for n in cfg.get("items", []) if _name_words(n)]
+    # Optional per-item loss tolerance: {"Venom": 50_000_000} = alert on Venom even
+    # at a loss, but only up to 50M. Items without an entry alert at any profit.
+    max_loss = [(_name_words(n), lim) for n, lim in (cfg.get("item_max_loss") or {}).items()]
     for item in match.listing.give:
         words = _name_words(item.name)
         if any(w <= words for w in wanted):
+            limits = [lim for w, lim in max_loss if w <= words]
+            if limits and match.delta < -min(limits):
+                continue
             return item.name
     min_value = cfg.get("min_profit") or cfg.get("min_get_value") or 0
     if min_value and match.delta >= min_value:

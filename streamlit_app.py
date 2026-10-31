@@ -910,6 +910,9 @@ _notify_age = st.number_input(
     "Alarm only for trades posted within (minutes, 0 = any age)", min_value=0,
     value=NOTIFY_MAX_AGE_MINUTES, step=1, key="notify_age_min",
 )
+if notify_cfg and notify_cfg.get("item_max_loss"):
+    st.caption("Max loss tolerated: " + ", ".join(
+        f"{n} {format_value(v)}" for n, v in notify_cfg["item_max_loss"].items()))
 if notify_cfg:
     st.caption(t(
         "notify_summary",

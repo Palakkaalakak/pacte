@@ -46,3 +46,15 @@ def test_blocked_placeholder_items() -> None:
     cfg = {"blocked_items": ["or", "Upgrade"]}
     assert filter_listings([ok, bad, bad2], cfg) == [ok]
     assert filter_listings([ok, bad, bad2], None) == [ok, bad, bad2]
+
+
+def test_item_max_loss_tolerance() -> None:
+    from types import SimpleNamespace as N
+    from blox_trade_finder.live import notify_reason
+    mk = lambda delta, name="Venom": N(
+        delta=delta, listing=N(give=[N(name=name)], created_at=datetime.now(timezone.utc)))
+    cfg = {"items": ["Venom", "Yellow Lightning"], "item_max_loss": {"Venom": 50_000_000}}
+    assert notify_reason(mk(-49_000_000), cfg) == "Venom"
+    assert notify_reason(mk(10_000_000), cfg) == "Venom"
+    assert notify_reason(mk(-51_000_000), cfg) is None
+    assert notify_reason(mk(-900_000_000, "Yellow Lightning"), cfg) == "Yellow Lightning"  # no limit set
