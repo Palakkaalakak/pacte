@@ -1,4 +1,11 @@
 {
-  "items": ["Venom", "Yellow Lightning", "Starlight Gravity"],
-  "min_profit": 10000000
+  "items": [
+    "Venom",
+    "Yellow Lightning",
+    "Starlight Gravity"
+  ],
+  "min_profit": 10000000,
+  "item_max_loss": {
+    "Venom": 50000000
+  }
 }
