@@ -602,17 +602,17 @@ def _list_user_notify() -> dict[str, Path]:
 def _alarm_html(count: int) -> str:
     """Loud siren via WebAudio with an in-frame Stop button (no rerun needed,
     so it works instantly even while live mode is sleeping). Unique per call so
-    the iframe re-runs it. Auto-stops after 60 s."""
+    the iframe re-runs it. Auto-stops after 3 s."""
     return f"""<div style="font-family:sans-serif">
 <button id="stop" style="width:100%;padding:12px;font-size:18px;font-weight:bold;background:#d32f2f;color:#fff;border:0;border-radius:8px;cursor:pointer">🔇 STOP ALARM</button>
 <div id="st" style="font-size:12px;margin-top:4px"></div>
 </div>
 <script>/* {time.time()}-{count} */
 (function(){{
-  var title = null, C = null, o = null, timer = null;
+  var title = null, C = null, timer = null;
   try {{ title = window.parent.document.title; window.parent.document.title = "🚨 {count} TRADE HIT(S)!"; }} catch(e) {{}}
   function stop() {{
-    try {{ clearInterval(timer); o && o.stop(); C && C.close(); }} catch(e) {{}}
+    try {{ clearInterval(timer); C && C.close(); }} catch(e) {{}}
     try {{ if (title !== null) window.parent.document.title = title; }} catch(e) {{}}
     var b = document.getElementById("stop"); b.textContent = "✅ Alarm stopped"; b.disabled = true;
   }}
@@ -622,13 +622,22 @@ def _alarm_html(count: int) -> str:
     if (C.state === "suspended") C.resume();
     setTimeout(function() {{
       var st = document.getElementById("st");
-      st.textContent = C.state === "running" ? "🔊 playing" : "⚠️ browser blocked audio (" + C.state + ") — click this page once, then use Test alarm";
+      st.textContent = C.state === "running" ? "🔔 ding!" : "⚠️ browser blocked audio (" + C.state + ") — click this page once, then use Test alarm";
     }}, 300);
-    var g = C.createGain(); g.gain.value = 1.0; g.connect(C.destination);
-    o = C.createOscillator(); o.type = "square"; o.connect(g); o.start();
-    var hi = true;
-    timer = setInterval(function() {{ o.frequency.value = (hi = !hi) ? 990 : 660; }}, 250);
-    setTimeout(stop, 60000);
+    // Soft three-note chime (C6-E6-G6, twice): sine tones with a fast attack and
+    // smooth decay instead of a harsh siren. Ends by itself well inside 3 s.
+    var master = C.createGain(); master.gain.value = 0.35; master.connect(C.destination);
+    var notes = [1046.5, 1318.5, 1568.0, 1046.5, 1318.5, 1568.0];
+    notes.forEach(function(f, i) {{
+      var t0 = C.currentTime + i * 0.42;
+      var o = C.createOscillator(), g = C.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(1, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+      o.connect(g); g.connect(master); o.start(t0); o.stop(t0 + 0.45);
+    }});
+    setTimeout(stop, 3000);  // auto-stop after 3 s
   }} catch(e) {{}}
 }})();
 </script>"""
@@ -1155,7 +1164,7 @@ def _live_panel() -> None:
         if snap["alarm_seq"] > ss.get("alarm_seq_played", 0):
             ss["alarm_seq_played"] = snap["alarm_seq"]
             ss["alarm_html"] = _alarm_html(snap["alarm_hits"])
-            ss["alarm_until"] = time.time() + 60
+            ss["alarm_until"] = time.time() + 10
     # Same html every poll => the iframe is kept (not reloaded), so the siren plays on.
     if time.time() < ss.get("alarm_until", 0):
         import streamlit.components.v1 as components
