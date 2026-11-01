@@ -66,13 +66,14 @@ def test_full_refetch_only_when_chains_or_arbitrage_on() -> None:
 
     def fake_scan(*a, **k):
         calls.append(k.get("bfv_max_pages"))
+        k["bfv_store"]["ad"] = 1  # a real full fetch leaves ads in the store
         return ScanResult(matches=[], name_warnings=[], listings=[])
 
     def run(chain_cfg, n=12):
         calls.clear()
         w = LiveWorker(
             inventory=Inventory(items=[InventoryEntry(name="X")]), goals=Goals(any=True),
-            sources=["gamersberg"], notify_cfg={}, max_age_minutes=None, chain_cfg=chain_cfg,
+            sources=["gamersberg", "bloxfruitsvalues"], notify_cfg={}, max_age_minutes=None, chain_cfg=chain_cfg,
             interval_seconds=1, scan_fn=fake_scan,
         )
         for _ in range(n):
@@ -80,7 +81,7 @@ def test_full_refetch_only_when_chains_or_arbitrage_on() -> None:
         return list(calls)
 
     plain = run(None)
-    assert plain[0] is None and all(c == 1 for c in plain[1:])            # new-offer scan: newest page only
+    assert all(c == 1 for c in plain)                                     # new-offer scan: newest page only, even the first
     with_chains = run({"value_basis": "gamersberg", "max_age_minutes": 5, "max_steps": 3,
                        "min_profit": 0, "target_names": set()})
     assert with_chains[0] is None and with_chains[10] is None and with_chains[5] == 1
@@ -102,7 +103,7 @@ def test_constant_mode_rescans_back_to_back() -> None:
     w.start()
     _t.sleep(3.5)
     w.stop()
-    assert len(stamps) >= 3 and all(b - a >= 0.9 for a, b in zip(stamps, stamps[1:]))
+    assert len(stamps) >= 3 and all(b - a >= 0.45 for a, b in zip(stamps, stamps[1:]))
 
 
 def test_new_offers_persist_in_feed_across_scans() -> None:
@@ -132,3 +133,28 @@ def test_new_offers_persist_in_feed_across_scans() -> None:
         w._scan_once()
     rows = w.snapshot()["view"]["rows"]
     assert [r["url"] for r in rows] == ["u2", "u1"]   # newest first; u2 (found in scan 2) is still shown after scan 3
+
+
+def test_constant_mode_gamersberg_never_waits_on_slow_bfv() -> None:
+    import time as _t
+    log = []
+
+    def fake_scan(*a, **k):
+        src = tuple(k["sources"])
+        log.append((src, _t.time()))
+        if src == ("bloxfruitsvalues",):
+            _t.sleep(2.5)            # slow site
+        return ScanResult(matches=[], name_warnings=[], listings=[])
+
+    w = LiveWorker(
+        inventory=Inventory(items=[InventoryEntry(name="X")]), goals=Goals(any=True),
+        sources=["gamersberg", "bloxfruitsvalues"], notify_cfg={}, max_age_minutes=None, chain_cfg=None,
+        interval_seconds=0, scan_fn=fake_scan,
+    )
+    w.start()
+    _t.sleep(4)
+    w.stop()
+    gb = [t for s, t in log if s == ("gamersberg",)]
+    bfv = [t for s, t in log if s == ("bloxfruitsvalues",)]
+    assert len(gb) >= 5 and len(bfv) >= 1           # gamersberg kept polling while bfv was busy
+    assert not [1 for s, _ in log if len(s) > 1]     # never a combined scan in constant mode

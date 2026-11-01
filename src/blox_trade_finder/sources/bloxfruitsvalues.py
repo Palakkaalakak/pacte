@@ -25,6 +25,7 @@ GAME_TYPE = "bloxfruits"
 # with many inventory items stays a bounded number of requests.
 PAGE_SIZE = 50
 MAX_PAGES_PER_ITEM = 3
+LIVE_PAGE_SIZE = 20
 TTL_SECONDS = 2 * 60
 # Items fetched concurrently; the shared RateLimiter still paces actual HTTP
 # requests to ~1/sec, so this just removes idle thread-switch overhead rather
@@ -46,6 +47,9 @@ class BloxFruitsValuesSource(TradeSource):
         # Own rate limiter — independent of Gamersberg's, so scanning both
         # sites concurrently doesn't cross-throttle two unrelated hosts.
         self._rate_limiter = RateLimiter(request_interval)
+        # Fast (live) mode: a flaky request is retried quickly and then skipped — the next scan
+        # is seconds away, so it isn't worth waiting 1s+2s+4s for one failing item.
+        self._retry = {"max_retries": 2, "backoff_base": 0.25} if request_interval < 1.0 else {}
 
     def close(self) -> None:
         self._client.close()
@@ -120,8 +124,14 @@ class BloxFruitsValuesSource(TradeSource):
                 self._client,
                 "GET",
                 f"/api/v1/tradeads/{GAME_TYPE}/all",
-                params={"page": page, "pageSize": PAGE_SIZE, "filter": name, "scope": "wants"},
-                rate_limiter=self._rate_limiter,
+                params={
+                    "page": page,
+                    # Newest-page polling only needs the latest handful of ads: a small page
+                    # is ~5x less data per request than the full 50.
+                    "pageSize": LIVE_PAGE_SIZE if max_pages == 1 else PAGE_SIZE,
+                    "filter": name, "scope": "wants",
+                },
+                rate_limiter=self._rate_limiter, **self._retry,
             )
             resp.raise_for_status()
             body = resp.json()

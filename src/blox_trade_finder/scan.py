@@ -75,6 +75,7 @@ def run_scan(
     bfv_workers: int = 5,
     bfv_max_pages: int | None = None,
     bfv_store: dict | None = None,
+    catalog_fresh: bool | None = None,
 ) -> ScanResult:
     """Fetch, normalize and match. `sources` defaults to all of VALID_SOURCES."""
     if sources is None:
@@ -131,7 +132,7 @@ def run_scan(
             _phase(progress, "catalog")
             # Catalog always comes from Gamersberg regardless of trade sources —
             # it's the item/value database both normalizers resolve against.
-            catalog = gamersberg.fetch_catalog(fresh=fresh)
+            catalog = gamersberg.fetch_catalog(fresh=fresh if catalog_fresh is None else catalog_fresh)
             name_warnings = check_inventory_names(inventory, catalog)
 
             try:

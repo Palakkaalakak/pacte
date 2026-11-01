@@ -94,6 +94,9 @@ class GamersbergSource(ValueSource, TradeSource):
         # shouldn't share a pacing clock. Also safe under threads: catalog and
         # trade-feed fetches may run concurrently against the same client.
         self._rate_limiter = RateLimiter(request_interval)
+        # Fast (live) mode: a flaky request is retried quickly and then skipped — the next scan
+        # is seconds away, so it isn't worth waiting 1s+2s+4s for one failing item.
+        self._retry = {"max_retries": 2, "backoff_base": 0.25} if request_interval < 1.0 else {}
 
     def close(self) -> None:
         self._client.close()
@@ -188,7 +191,7 @@ class GamersbergSource(ValueSource, TradeSource):
         while page <= page_cap:
             resp = request_with_retry(
                 self._client, "GET", f"/api/v1/trade/list/all/{GAME}", params={"page": page},
-                rate_limiter=self._rate_limiter,
+                rate_limiter=self._rate_limiter, **self._retry,
             )
             resp.raise_for_status()
             body = resp.json()
@@ -243,7 +246,7 @@ class GamersbergSource(ValueSource, TradeSource):
         while True:
             resp = request_with_retry(
                 self._client, "GET", f"/api/v1/trade/list/all/{GAME}", params={"page": page},
-                rate_limiter=self._rate_limiter,
+                rate_limiter=self._rate_limiter, **self._retry,
             )
             resp.raise_for_status()
             body = resp.json()

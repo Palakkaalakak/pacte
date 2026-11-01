@@ -46,7 +46,7 @@ def make_client(base_url: str, referer: str) -> httpx.Client:
 
 
 def request_with_retry(
-    client: httpx.Client, method: str, url: str, *, rate_limiter: RateLimiter, max_retries: int = 3, **kwargs
+    client: httpx.Client, method: str, url: str, *, rate_limiter: RateLimiter, max_retries: int = 3, backoff_base: float = 1.0, **kwargs
 ) -> httpx.Response:
     last_exc: Exception | None = None
     for attempt in range(max_retries):
@@ -60,6 +60,6 @@ def request_with_retry(
             return resp
         except (httpx.HTTPStatusError, httpx.TransportError) as exc:
             last_exc = exc
-            time.sleep(2**attempt)
+            time.sleep(backoff_base * 2**attempt)
     assert last_exc is not None
     raise last_exc

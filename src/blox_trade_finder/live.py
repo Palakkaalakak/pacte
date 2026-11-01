@@ -26,7 +26,7 @@ NOTIFY_MAX_AGE_MINUTES = 10  # alarm / table only for listings this young
 FAST_REQUEST_INTERVAL = 0.25  # seconds between requests per site (interactive default is 1.0)
 FAST_BFV_WORKERS = 6
 FEED_MAX = 200  # newest offers kept on screen in live mode
-MIN_LOOP_SECONDS = 1  # floor between scan starts, even in constant mode
+MIN_LOOP_SECONDS = 0.5  # floor between scan starts, even in constant mode
 FULL_REFRESH_EVERY = 10  # full bloxfruitsvalues refetch every N scans
 
 
@@ -208,6 +208,12 @@ class LiveWorker:
         self._feed: list[dict] = []
         self._feed_urls: set[str] = set()
         self._last_full = 0
+        self._proc_lock = threading.Lock()
+        self._baselined: set[str] = set()
+        self._src_listings: dict[str, list] = {}
+        self._errors: dict[tuple, str] = {}
+        self._gb_full_done = False
+        self._bfv_thread: threading.Thread | None = None
         self._last_seen_by_ui = time.time()
         self.state: dict = {
             "view": None, "chains": None, "chains_ts": 0.0, "scans": 0, "alarm_seq": 0,
@@ -231,63 +237,88 @@ class LiveWorker:
         with self._lock:
             return dict(self.state)
 
-    def _scan_once(self) -> None:
+    def _scan_once(self, sources: list[str] | None = None) -> None:
+        """One scan. `sources` narrows it to a single site (constant mode runs the two
+        sites in independent loops so the fast one never waits on the slow one)."""
+        sources = sources or self.sources
+        use_bfv = "bloxfruitsvalues" in sources
+        use_gb = "gamersberg" in sources
         with self._lock:
             self.state["scanning"] = True
         try:
             # Speed: paced requests are 4x quicker than the interactive default, results are
-            # never served from the 2-minute disk cache (so 1-minute scans see new ads), and
-            # after one full bloxfruitsvalues fetch we only re-read each item's NEWEST page
-            # (merged into a store) — a full refetch every FULL_REFRESH_EVERY scans resyncs
-            # anything filled/removed meanwhile. Gamersberg is already incremental via its store.
-            # Chains/arbitrage pair listings against the whole book, so while either is on we
-            # also do a full refetch every FULL_REFRESH_EVERY scans to drop filled ads. With
-            # only the normal new-offer scan there is no need — just the newest pages.
+            # never served from the 2-minute disk cache, and after one full bloxfruitsvalues
+            # fetch we only re-read each item's NEWEST page (merged into a store). Chains and
+            # arbitrage pair listings against the whole book, so while either is on we also
+            # do a full bloxfruitsvalues refetch every FULL_REFRESH_EVERY scans.
             needs_book = self.chain_cfg is not None or self.arb_cfg is not None
-            full = self._scan_no == 0 or (needs_book and self._scan_no - self._last_full >= FULL_REFRESH_EVERY)
-            if full:
-                self._bfv_store = {}
-                self._last_full = self._scan_no
+            full = False
+            if use_bfv:
+                # Only chains/arbitrage need the whole book. Plain new-offer scanning starts
+                # straight on the newest pages, so the first result arrives in seconds.
+                full = needs_book and (
+                    not self._bfv_store or self._scan_no - self._last_full >= FULL_REFRESH_EVERY
+                )
+                if full:
+                    self._bfv_store = {}
+                    self._last_full = self._scan_no
             self._scan_no += 1
+            # Gamersberg: one page once the first full pass is done and we're in constant mode.
+            gb_pages = 1 if (use_gb and self.interval == 0 and self._gb_full_done) else self.gb_max_pages
             result = self._scan_fn(
-                self.inventory, self.goals, sources=self.sources, deep=True,
-                gb_max_pages=(1 if (self.interval == 0 and self._scan_no > 1) else self.gb_max_pages),
-                custom_values=self.custom_values,
-                fresh=True, request_interval=FAST_REQUEST_INTERVAL, bfv_workers=FAST_BFV_WORKERS,
+                self.inventory, self.goals, sources=sources, deep=True,
+                gb_max_pages=gb_pages, custom_values=self.custom_values,
+                fresh=True, catalog_fresh=False,
+                request_interval=FAST_REQUEST_INTERVAL, bfv_workers=FAST_BFV_WORKERS,
                 bfv_max_pages=None if full else 1, bfv_store=self._bfv_store,
             )
-            view, self._seen = build_view(
-                result, self.notify_cfg, max_age_minutes=self.max_age_minutes, only_new=True, seen=self._seen,
-                scam_cfg=self.scam_cfg, notify_age_minutes=self.notify_age_minutes,
-            )
-            # Keep new offers on screen: each scan only reports what is NEW, so without this
-            # a hit would vanish at the next scan (seconds later in constant mode).
-            hits_this_scan = view["new_hits"]
-            for row in view["rows"]:
-                if row["url"] not in self._feed_urls:
-                    self._feed_urls.add(row["url"])
-                    self._feed.insert(0, row)
-            for row in self._feed:
-                row["is_new"] = row["is_new"] and row in view["rows"]
-            del self._feed[FEED_MAX:]
-            view = {**view, "rows": list(self._feed), "count": len(self._feed), "new_hits": hits_this_scan}
+            if use_gb:
+                self._gb_full_done = True
+            with self._proc_lock:  # the two constant-mode loops share seen/feed state
+                # Each source gets its own silent baseline, otherwise the first bloxfruitsvalues
+                # result would look "new" against Gamersberg's seen-set and alarm on everything.
+                baseline = [src for src in sources if src not in self._baselined]
+                seen = None if baseline else self._seen
+                view, new_seen = build_view(
+                    result, self.notify_cfg, max_age_minutes=self.max_age_minutes, only_new=True,
+                    seen=seen, scam_cfg=self.scam_cfg, notify_age_minutes=self.notify_age_minutes,
+                )
+                self._seen = (self._seen or set()) | new_seen
+                self._baselined.update(sources)
+                # Keep new offers on screen: each scan only reports what is NEW, so without this
+                # a hit would vanish at the next scan (seconds later in constant mode).
+                hits_this_scan = view["new_hits"]
+                this_scan = {r["url"] for r in view["rows"]}
+                for row in view["rows"]:
+                    if row["url"] not in self._feed_urls:
+                        self._feed_urls.add(row["url"])
+                        self._feed.insert(0, row)
+                for row in self._feed:
+                    row["is_new"] = row["is_new"] and row["url"] in this_scan
+                del self._feed[FEED_MAX:]
+                view = {**view, "rows": list(self._feed), "count": len(self._feed), "new_hits": hits_this_scan}
+                for src in sources:
+                    self._src_listings[src] = [l for l in result.listings if l.source == src]
+                book = [l for ls in self._src_listings.values() for l in ls]
             chains = None
             if self.chain_cfg is not None:
                 chains = filter_chains(
-                    find_chains(filter_listings(result.listings, self.scam_cfg), inventory_counts(self.inventory), **self.chain_cfg), self.scam_cfg
+                    find_chains(filter_listings(book, self.scam_cfg), inventory_counts(self.inventory), **self.chain_cfg),
+                    self.scam_cfg,
                 )
             arb = None
             if self.arb_cfg is not None:
                 arb = build_arb_view(
-                    result.listings, cfg=self.arb_cfg, inventory_counts=inventory_counts(self.inventory),
+                    book, cfg=self.arb_cfg, inventory_counts=inventory_counts(self.inventory),
                     scam_cfg=self.scam_cfg,
                 )
             with self._lock:
                 if arb is not None:
                     self.state["arb"] = arb
+                self._errors.pop(tuple(sources), None)
                 self.state.update(
                     view=view, scans=self.state["scans"] + 1, last_scan_ts=time.time(),
-                    error=None, listings=(time.time(), result.listings),
+                    error="; ".join(self._errors.values()) or None, listings=(time.time(), book),
                 )
                 if chains is not None:
                     self.state.update(chains=chains, chains_ts=time.time())
@@ -297,19 +328,41 @@ class LiveWorker:
         except Exception as exc:  # keep looping — a failed scan must not kill the checker
             logger.exception("live scan failed")
             with self._lock:
-                self.state.update(error=f"{type(exc).__name__}: {exc}", last_scan_ts=time.time())
+                self._errors[tuple(sources)] = f"{type(exc).__name__}: {exc}"
+                self.state.update(error="; ".join(self._errors.values()), last_scan_ts=time.time())
         finally:
             with self._lock:
                 self.state["scanning"] = False
 
+    def _idle_expired(self) -> bool:
+        if time.time() - self._last_seen_by_ui > self.idle_timeout:
+            self._stop.set()  # browser tab gone — don't scan forever
+            return True
+        return False
+
+    def _bfv_loop(self) -> None:
+        """Constant mode: bloxfruitsvalues on its own loop (it is the slow site), so
+        Gamersberg's page-1 polling never waits for it. Exits when constant mode ends."""
+        while not self._stop.is_set() and self.interval == 0:
+            if self._idle_expired():
+                return
+            self._scan_once(["bloxfruitsvalues"])
+            self._stop.wait(MIN_LOOP_SECONDS)
+
     def _loop(self) -> None:
         while not self._stop.is_set():
-            self._scan_once()
+            constant = self.interval == 0 and set(self.sources) >= {"gamersberg", "bloxfruitsvalues"}
+            if constant:
+                if self._bfv_thread is None or not self._bfv_thread.is_alive():
+                    self._bfv_thread = threading.Thread(target=self._bfv_loop, daemon=True, name="live-bfv")
+                    self._bfv_thread.start()
+                self._scan_once(["gamersberg"])
+            else:
+                self._scan_once()
             started = time.time()
-            # interval 0 = constant mode: go again right away, with a 1 s floor so a fast scan
-            # can never turn into a tight request loop.
-            while not self._stop.is_set() and time.time() < started + max(self.interval, MIN_LOOP_SECONDS):  # interval may change live
-                if time.time() - self._last_seen_by_ui > self.idle_timeout:
-                    self._stop.set()  # browser tab gone — don't scan forever
+            # interval 0 = constant mode: go again right away, with a floor so a fast scan can
+            # never turn into a tight request loop.
+            while not self._stop.is_set() and time.time() < started + max(self.interval, MIN_LOOP_SECONDS):
+                if self._idle_expired():
                     return
-                self._stop.wait(1)
+                self._stop.wait(0.25 if self.interval == 0 else 1)
