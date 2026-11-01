@@ -87,13 +87,13 @@ class GamersbergSource(ValueSource, TradeSource):
     ttl_seconds_catalog = 60 * 60
     ttl_seconds_trades = 2 * 60
 
-    def __init__(self) -> None:
+    def __init__(self, request_interval: float = 1.0) -> None:
         self._client = make_client(BASE_URL, REFERER)
         # Own rate limiter, independent of any other source — a Gamersberg
         # request and a bloxfruitsvalues.com request are unrelated hosts and
         # shouldn't share a pacing clock. Also safe under threads: catalog and
         # trade-feed fetches may run concurrently against the same client.
-        self._rate_limiter = RateLimiter()
+        self._rate_limiter = RateLimiter(request_interval)
 
     def close(self) -> None:
         self._client.close()

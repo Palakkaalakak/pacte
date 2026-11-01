@@ -40,11 +40,12 @@ class BloxFruitsValuesSource(TradeSource):
     id = "bloxfruitsvalues"
     ttl_seconds = TTL_SECONDS
 
-    def __init__(self) -> None:
+    def __init__(self, request_interval: float = 1.0, max_workers: int = MAX_WORKERS) -> None:
+        self._max_workers = max_workers
         self._client = make_client(BASE_URL, REFERER)
         # Own rate limiter — independent of Gamersberg's, so scanning both
         # sites concurrently doesn't cross-throttle two unrelated hosts.
-        self._rate_limiter = RateLimiter()
+        self._rate_limiter = RateLimiter(request_interval)
 
     def close(self) -> None:
         self._client.close()
@@ -55,6 +56,7 @@ class BloxFruitsValuesSource(TradeSource):
         item_names: list[str] | None = None,
         fresh: bool = False,
         on_item_done: Callable[[str], None] | None = None,
+        max_pages: int | None = None,
     ) -> list[dict]:
         """`on_item_done(name)` is called once per item after it's been queried
         (whether it succeeded or was skipped) — lets the CLI show real
@@ -68,10 +70,13 @@ class BloxFruitsValuesSource(TradeSource):
         )
         def _fetch_one(name: str) -> list[dict] | None:
             try:
+                # Partial (newest-page-only) fetches get their own cache key so they
+                # can never be mistaken for a full multi-page result.
+                suffix = f"_p{max_pages}" if max_pages else ""
                 return get_or_fetch(
-                    f"bfv_trades_{_slugify(name)}",
+                    f"bfv_trades_{_slugify(name)}{suffix}",
                     self.ttl_seconds,
-                    lambda n=name: self._fetch_for_name(n),
+                    lambda n=name: self._fetch_for_name(n, max_pages) if max_pages else self._fetch_for_name(n),
                     fresh=fresh,
                 )
             except (httpx.HTTPStatusError, httpx.TransportError) as exc:
@@ -89,7 +94,7 @@ class BloxFruitsValuesSource(TradeSource):
 
         by_id: dict[str, dict] = {}
         by_id_lock = threading.Lock()
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             futures = {executor.submit(_fetch_one, name): name for name in item_names}
             for future in as_completed(futures):
                 name = futures[future]
@@ -107,10 +112,10 @@ class BloxFruitsValuesSource(TradeSource):
         logger.info("bloxfruitsvalues: %d unique trade ads collected total", len(by_id))
         return list(by_id.values())
 
-    def _fetch_for_name(self, name: str) -> list[dict]:
+    def _fetch_for_name(self, name: str, max_pages: int | None = None) -> list[dict]:
         results: list[dict] = []
         page = 1
-        while page <= MAX_PAGES_PER_ITEM:
+        while page <= (max_pages or MAX_PAGES_PER_ITEM):
             resp = request_with_retry(
                 self._client,
                 "GET",

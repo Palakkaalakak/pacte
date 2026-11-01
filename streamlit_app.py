@@ -980,7 +980,7 @@ st.number_input(
 )
 live_mode = st.toggle(t("live_toggle"), value=False, key="live_mode")
 live_interval = 60 * st.radio(
-    "Scan every", [5, 2], horizontal=True, format_func=lambda m: f"{m} min", key="live_interval_min",
+    "Scan every", [5, 2, 1], horizontal=True, format_func=lambda m: f"{m} min", key="live_interval_min",
 )
 if notify_cfg and st.button(t("notify_test")):
     _play_alarm(0)

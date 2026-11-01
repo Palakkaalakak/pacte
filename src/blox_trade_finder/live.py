@@ -23,6 +23,9 @@ from blox_trade_finder.ui.table import format_value
 logger = logging.getLogger(__name__)
 
 NOTIFY_MAX_AGE_MINUTES = 10  # alarm / table only for listings this young
+FAST_REQUEST_INTERVAL = 0.25  # seconds between requests per site (interactive default is 1.0)
+FAST_BFV_WORKERS = 6
+FULL_REFRESH_EVERY = 10  # full bloxfruitsvalues refetch every N scans
 
 
 def _name_words(name: str) -> frozenset[str]:
@@ -198,6 +201,8 @@ class LiveWorker:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True, name="live-checker")
         self._seen: set[str] | None = None
+        self._bfv_store: dict = {}
+        self._scan_no = 0
         self._last_seen_by_ui = time.time()
         self.state: dict = {
             "view": None, "chains": None, "chains_ts": 0.0, "scans": 0, "alarm_seq": 0,
@@ -225,9 +230,20 @@ class LiveWorker:
         with self._lock:
             self.state["scanning"] = True
         try:
+            # Speed: paced requests are 4x quicker than the interactive default, results are
+            # never served from the 2-minute disk cache (so 1-minute scans see new ads), and
+            # after one full bloxfruitsvalues fetch we only re-read each item's NEWEST page
+            # (merged into a store) — a full refetch every FULL_REFRESH_EVERY scans resyncs
+            # anything filled/removed meanwhile. Gamersberg is already incremental via its store.
+            full = self._scan_no % FULL_REFRESH_EVERY == 0
+            if full:
+                self._bfv_store = {}
+            self._scan_no += 1
             result = self._scan_fn(
                 self.inventory, self.goals, sources=self.sources, deep=True,
                 gb_max_pages=self.gb_max_pages, custom_values=self.custom_values,
+                fresh=True, request_interval=FAST_REQUEST_INTERVAL, bfv_workers=FAST_BFV_WORKERS,
+                bfv_max_pages=None if full else 1, bfv_store=self._bfv_store,
             )
             view, self._seen = build_view(
                 result, self.notify_cfg, max_age_minutes=self.max_age_minutes, only_new=True, seen=self._seen,

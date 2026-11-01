@@ -71,6 +71,10 @@ def run_scan(
     progress: ScanProgress | None = None,
     gb_max_pages: int | None = None,
     custom_values: dict | None = None,
+    request_interval: float = 1.0,
+    bfv_workers: int = 5,
+    bfv_max_pages: int | None = None,
+    bfv_store: dict | None = None,
 ) -> ScanResult:
     """Fetch, normalize and match. `sources` defaults to all of VALID_SOURCES."""
     if sources is None:
@@ -81,8 +85,8 @@ def run_scan(
     use_gb = "gamersberg" in sources
     use_bfv = "bloxfruitsvalues" in sources
 
-    gamersberg = GamersbergSource()
-    bfv = BloxFruitsValuesSource()
+    gamersberg = GamersbergSource(request_interval)
+    bfv = BloxFruitsValuesSource(request_interval, bfv_workers)
     try:
         item_names = [entry.name for entry in inventory.items]
 
@@ -110,7 +114,7 @@ def run_scan(
                     progress.on_bfv_item_done(name, _count[0], len(item_names))
 
             return bfv.fetch_listings_raw(
-                item_names=item_names, fresh=fresh, on_item_done=_on_item_done
+                item_names=item_names, fresh=fresh, on_item_done=_on_item_done, max_pages=bfv_max_pages,
             )
 
         # The two hosts are unrelated (each source has its own rate limiter),
@@ -143,6 +147,14 @@ def run_scan(
                 ) from None
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
+
+        if bfv_store is not None:
+            # Incremental mode: newest-page fetches are merged into a persistent store so
+            # older ads found by an earlier full fetch are kept (expired ones are skipped
+            # later by the normalizer).
+            for ad in bfv_raw:
+                bfv_store[ad["id"]] = ad
+            bfv_raw = list(bfv_store.values())
 
         _phase(progress, "matching")
         listings = build_listings(gamersberg_raw, catalog) + build_listings_bfv(bfv_raw, catalog)
