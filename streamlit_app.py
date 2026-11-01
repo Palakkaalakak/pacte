@@ -979,8 +979,9 @@ st.number_input(
     "Hide trades older than (minutes, 0 = show all)", min_value=0, value=0, step=1, key="max_age_min",
 )
 live_mode = st.toggle(t("live_toggle"), value=False, key="live_mode")
-live_interval = 60 * st.radio(
-    "Scan every", [5, 2, 1], horizontal=True, format_func=lambda m: f"{m} min", key="live_interval_min",
+live_interval = st.radio(
+    "Scan every", [300, 120, 60, 30], horizontal=True, key="live_interval_s",
+    format_func=lambda sec: f"{sec // 60} min" if sec >= 60 else f"{sec} s",
 )
 if notify_cfg and st.button(t("notify_test")):
     _play_alarm(0)
