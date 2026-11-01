@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 NOTIFY_MAX_AGE_MINUTES = 10  # alarm / table only for listings this young
 FAST_REQUEST_INTERVAL = 0.25  # seconds between requests per site (interactive default is 1.0)
 FAST_BFV_WORKERS = 6
+BFV_LATEST_PAGE_SIZE = 100  # newest ads fetched per poll of bloxfruitsvalues' global feed
+FAIL_STREAK_TO_REPORT = 6  # consecutive failed polls of one source before showing an error
+BFV_POLLERS = 3  # overlapping pollers: one slow response never stalls polling
 FEED_MAX = 200  # newest offers kept on screen in live mode
 MIN_LOOP_SECONDS = 0.5  # floor between scan starts, even in constant mode
 FULL_REFRESH_EVERY = 10  # full bloxfruitsvalues refetch every N scans
@@ -212,6 +215,7 @@ class LiveWorker:
         self._baselined: set[str] = set()
         self._src_listings: dict[str, list] = {}
         self._errors: dict[tuple, str] = {}
+        self._fail_streak: dict[tuple, int] = {}
         self._gb_full_done = False
         self._bfv_thread: threading.Thread | None = None
         self._last_seen_by_ui = time.time()
@@ -271,6 +275,7 @@ class LiveWorker:
                 fresh=True, catalog_fresh=False,
                 request_interval=FAST_REQUEST_INTERVAL, bfv_workers=FAST_BFV_WORKERS,
                 bfv_max_pages=None if full else 1, bfv_store=self._bfv_store,
+                bfv_latest=None if full else BFV_LATEST_PAGE_SIZE,
             )
             if use_gb:
                 self._gb_full_done = True
@@ -316,6 +321,7 @@ class LiveWorker:
                 if arb is not None:
                     self.state["arb"] = arb
                 self._errors.pop(tuple(sources), None)
+                self._fail_streak[tuple(sources)] = 0
                 self.state.update(
                     view=view, scans=self.state["scans"] + 1, last_scan_ts=time.time(),
                     error="; ".join(self._errors.values()) or None, listings=(time.time(), book),
@@ -326,10 +332,15 @@ class LiveWorker:
                     self.state["alarm_seq"] += 1
                     self.state["alarm_hits"] = view["new_hits"]
         except Exception as exc:  # keep looping — a failed scan must not kill the checker
-            logger.exception("live scan failed")
+            logger.warning("live scan of %s failed: %s: %s", sources, type(exc).__name__, exc)
             with self._lock:
-                self._errors[tuple(sources)] = f"{type(exc).__name__}: {exc}"
-                self.state.update(error="; ".join(self._errors.values()), last_scan_ts=time.time())
+                # One timeout among many polls is normal for these sites; only surface an error
+                # once a source has failed several polls in a row.
+                key = tuple(sources)
+                self._fail_streak[key] = self._fail_streak.get(key, 0) + 1
+                if self._fail_streak[key] >= FAIL_STREAK_TO_REPORT:
+                    self._errors[key] = f"{type(exc).__name__}: {exc}"
+                self.state.update(error="; ".join(self._errors.values()) or None, last_scan_ts=time.time())
         finally:
             with self._lock:
                 self.state["scanning"] = False
@@ -340,14 +351,27 @@ class LiveWorker:
             return True
         return False
 
-    def _bfv_loop(self) -> None:
-        """Constant mode: bloxfruitsvalues on its own loop (it is the slow site), so
-        Gamersberg's page-1 polling never waits for it. Exits when constant mode ends."""
+    def _bfv_poller(self) -> None:
         while not self._stop.is_set() and self.interval == 0:
             if self._idle_expired():
                 return
             self._scan_once(["bloxfruitsvalues"])
             self._stop.wait(MIN_LOOP_SECONDS)
+
+    def _bfv_loop(self) -> None:
+        """Constant mode: bloxfruitsvalues on its own loops (it is the slow, erratic site, with
+        responses ranging from 0.3 s to 10 s+), so Gamersberg's polling never waits for it. Several
+        staggered pollers overlap, so one slow response doesn't delay the next poll. Exits when
+        constant mode ends."""
+        helpers = []
+        for i in range(1, BFV_POLLERS):
+            self._stop.wait(MIN_LOOP_SECONDS * i / BFV_POLLERS)
+            t = threading.Thread(target=self._bfv_poller, daemon=True, name=f"live-bfv-{i}")
+            t.start()
+            helpers.append(t)
+        self._bfv_poller()
+        for t in helpers:
+            t.join(timeout=1)
 
     def _loop(self) -> None:
         while not self._stop.is_set():

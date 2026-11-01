@@ -27,6 +27,7 @@ from blox_trade_finder.store import TradeStore
 
 logger = logging.getLogger(__name__)
 
+BFV_STORE_MAX = 3000
 VALID_SOURCES = ("gamersberg", "bloxfruitsvalues")
 
 # Hard ceiling on how long we wait for either source's fetch thread. Every
@@ -76,6 +77,7 @@ def run_scan(
     bfv_max_pages: int | None = None,
     bfv_store: dict | None = None,
     catalog_fresh: bool | None = None,
+    bfv_latest: int | None = None,
 ) -> ScanResult:
     """Fetch, normalize and match. `sources` defaults to all of VALID_SOURCES."""
     if sources is None:
@@ -106,6 +108,10 @@ def run_scan(
             return gamersberg.fetch_listings_raw(fresh=fresh)
 
         def _fetch_bfv() -> list[dict]:
+            if use_bfv and bfv_latest:
+                # Live polling: one request for the site's newest ads (any item); the matcher
+                # still only keeps trades YOU can make from your inventory.
+                return bfv.fetch_latest_raw(bfv_latest)
             if not (use_bfv and item_names):
                 return []
 
@@ -155,6 +161,10 @@ def run_scan(
             # later by the normalizer).
             for ad in bfv_raw:
                 bfv_store[ad["id"]] = ad
+            if len(bfv_store) > BFV_STORE_MAX:  # keep only the newest ads
+                newest = sorted(bfv_store.values(), key=lambda a: a.get("created_at") or "", reverse=True)
+                bfv_store.clear()
+                bfv_store.update({a["id"]: a for a in newest[:BFV_STORE_MAX]})
             bfv_raw = list(bfv_store.values())
 
         _phase(progress, "matching")

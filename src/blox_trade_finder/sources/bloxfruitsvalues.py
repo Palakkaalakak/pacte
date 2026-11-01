@@ -116,6 +116,19 @@ class BloxFruitsValuesSource(TradeSource):
         logger.info("bloxfruitsvalues: %d unique trade ads collected total", len(by_id))
         return list(by_id.values())
 
+    def fetch_latest_raw(self, page_size: int = 100) -> list[dict]:
+        """The site's own global newest-first feed (what its trading page polls): ONE request
+        returns the latest `page_size` ads across every item. `count=estimate` is essential —
+        without it the server tries to count 200k+ ads and answers 500. Fails fast (short
+        timeout, no retry) because the caller polls again within a second."""
+        resp = request_with_retry(
+            self._client, "GET", f"/api/v1/tradeads/{GAME_TYPE}/all",
+            params={"page": 1, "pageSize": page_size, "count": "estimate"},
+            rate_limiter=self._rate_limiter, max_retries=1, backoff_base=0.0, timeout=4.0,
+        )
+        resp.raise_for_status()
+        return resp.json().get("items") or []
+
     def _fetch_for_name(self, name: str, max_pages: int | None = None) -> list[dict]:
         results: list[dict] = []
         page = 1
