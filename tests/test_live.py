@@ -103,3 +103,32 @@ def test_constant_mode_rescans_back_to_back() -> None:
     _t.sleep(3.5)
     w.stop()
     assert len(stamps) >= 3 and all(b - a >= 0.9 for a, b in zip(stamps, stamps[1:]))
+
+
+def test_new_offers_persist_in_feed_across_scans() -> None:
+    from datetime import timedelta
+    from types import SimpleNamespace as N
+    from blox_trade_finder.models import CatalogItem, Listing, Match
+
+    def mk(i):
+        l = Listing(id=str(i), source="g", url=f"u{i}", poster_name="p", poster_rating=1.0, wfl={},
+                    give=[CatalogItem(id=1, name="Venom")], want=[CatalogItem(id=2, name="Pain")],
+                    created_at=datetime.now(timezone.utc))
+        return Match(listing=l, give_value=1, get_value=2, delta=1, profit_pct=1.0, demand=1,
+                     confidence=50, score=1.0, reasons=[], verdict="win")
+
+    batches = [[mk(1)], [mk(1), mk(2)], [mk(1), mk(2)]]
+    it = iter(batches)
+
+    def fake_scan(*a, **k):
+        return ScanResult(matches=next(it), name_warnings=[], listings=[])
+
+    w = LiveWorker(
+        inventory=Inventory(items=[InventoryEntry(name="X")]), goals=Goals(any=True),
+        sources=["gamersberg"], notify_cfg={}, max_age_minutes=None, chain_cfg=None,
+        interval_seconds=1, scan_fn=fake_scan,
+    )
+    for _ in range(3):
+        w._scan_once()
+    rows = w.snapshot()["view"]["rows"]
+    assert [r["url"] for r in rows] == ["u2", "u1"]   # newest first; u2 (found in scan 2) is still shown after scan 3

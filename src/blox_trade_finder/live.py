@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 NOTIFY_MAX_AGE_MINUTES = 10  # alarm / table only for listings this young
 FAST_REQUEST_INTERVAL = 0.25  # seconds between requests per site (interactive default is 1.0)
 FAST_BFV_WORKERS = 6
+FEED_MAX = 200  # newest offers kept on screen in live mode
 MIN_LOOP_SECONDS = 1  # floor between scan starts, even in constant mode
 FULL_REFRESH_EVERY = 10  # full bloxfruitsvalues refetch every N scans
 
@@ -204,6 +205,8 @@ class LiveWorker:
         self._seen: set[str] | None = None
         self._bfv_store: dict = {}
         self._scan_no = 0
+        self._feed: list[dict] = []
+        self._feed_urls: set[str] = set()
         self._last_full = 0
         self._last_seen_by_ui = time.time()
         self.state: dict = {
@@ -248,7 +251,8 @@ class LiveWorker:
             self._scan_no += 1
             result = self._scan_fn(
                 self.inventory, self.goals, sources=self.sources, deep=True,
-                gb_max_pages=self.gb_max_pages, custom_values=self.custom_values,
+                gb_max_pages=(1 if (self.interval == 0 and self._scan_no > 1) else self.gb_max_pages),
+                custom_values=self.custom_values,
                 fresh=True, request_interval=FAST_REQUEST_INTERVAL, bfv_workers=FAST_BFV_WORKERS,
                 bfv_max_pages=None if full else 1, bfv_store=self._bfv_store,
             )
@@ -256,6 +260,17 @@ class LiveWorker:
                 result, self.notify_cfg, max_age_minutes=self.max_age_minutes, only_new=True, seen=self._seen,
                 scam_cfg=self.scam_cfg, notify_age_minutes=self.notify_age_minutes,
             )
+            # Keep new offers on screen: each scan only reports what is NEW, so without this
+            # a hit would vanish at the next scan (seconds later in constant mode).
+            hits_this_scan = view["new_hits"]
+            for row in view["rows"]:
+                if row["url"] not in self._feed_urls:
+                    self._feed_urls.add(row["url"])
+                    self._feed.insert(0, row)
+            for row in self._feed:
+                row["is_new"] = row["is_new"] and row in view["rows"]
+            del self._feed[FEED_MAX:]
+            view = {**view, "rows": list(self._feed), "count": len(self._feed), "new_hits": hits_this_scan}
             chains = None
             if self.chain_cfg is not None:
                 chains = filter_chains(
