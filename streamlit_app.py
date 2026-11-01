@@ -40,6 +40,7 @@ import streamlit as st
 
 from blox_trade_finder.models import Goals, Inventory, InventoryEntry
 from blox_trade_finder.live import build_arb_view, NOTIFY_MAX_AGE_MINUTES, LiveWorker, DEFAULT_BLOCKED_ITEMS, build_view, filter_chains, filter_listings
+from blox_trade_finder.core.overrides import CUSTOM_VALUES, DEFAULT_OVERRIDDEN, build_overrides
 from blox_trade_finder.scan import ScanProgress, run_scan
 from blox_trade_finder.sources.gamersberg import GamersbergSource
 from blox_trade_finder.ui.table import format_value
@@ -766,6 +767,22 @@ else:
             else:
                 st.warning(t("save_needs_name_items"))
 
+# ------------------------------------------------------------ custom values
+with st.expander("🧮 Custom item values (override the sites' numbers)"):
+    use_custom = st.toggle("Use my own values instead of Gamersberg's for the items below", value=False, key="use_custom")
+    custom_names = st.multiselect(
+        "Override these items", list(CUSTOM_VALUES.keys()), default=list(DEFAULT_OVERRIDDEN),
+        disabled=not use_custom, key="custom_names",
+    )
+    st.dataframe(
+        pd.DataFrame([{
+            "Item": n, "Demand": f"{d}/10", "Value": format_value(v),
+            "Active": "✅" if use_custom and n in custom_names else "",
+        } for n, (d, v) in CUSTOM_VALUES.items()]),
+        use_container_width=True, hide_index=True,
+    )
+custom_values = build_overrides(custom_names) if use_custom else None
+
 # ------------------------------------------------------------ account value
 @st.cache_resource(ttl=600)
 def _catalog_cached():
@@ -788,7 +805,7 @@ with st.expander("💰 Account value"):
             key="av_basis",
         )
         try:
-            _rows = value_inventory(inventory, _catalog_cached(), _av_basis)
+            _rows = value_inventory(inventory, _catalog_cached(), _av_basis, custom_values)
         except Exception as exc:
             _rows = None
             st.error(t("catalog_failed", error=f"{type(exc).__name__}: {exc}"))
@@ -1012,6 +1029,7 @@ if live_mode and inventory.items:
             chain_cfg=_chain_cfg() if st.session_state.get("chain_auto") else None,
             arb_cfg=_arb_cfg() if st.session_state.get("arb_auto") else None,
             interval_seconds=live_interval, gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
+            custom_values=custom_values,
         )
         worker.start()
         st.session_state["live_worker"] = worker
@@ -1020,6 +1038,7 @@ if live_mode and inventory.items:
         worker.inventory, worker.goals, worker.sources = inventory, goals, selected_sources
         worker.notify_cfg, worker.scam_cfg = notify_cfg, scam_cfg
         worker.interval = live_interval
+        worker.custom_values = custom_values
         worker.max_age_minutes = st.session_state.get("max_age_min") or None
         worker.notify_age_minutes = _notify_age or None
         worker.chain_cfg = _chain_cfg() if st.session_state.get("chain_auto") else None
@@ -1091,7 +1110,7 @@ if find_clicked:
             goals,
             sources=selected_sources,
             deep=True,
-            gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
+            gb_max_pages=INTERACTIVE_GB_MAX_PAGES, custom_values=custom_values,
             progress=ScanProgress(
                 on_phase=_on_phase,
                 on_bfv_item_done=_on_bfv_item,
@@ -1202,7 +1221,7 @@ with st.expander(t("chain_header"), expanded=False):
                     with st.spinner(t("progress_start")):
                         _cres = run_scan(
                             inventory, Goals(any=True), sources=selected_sources, deep=True,
-                            gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
+                            gb_max_pages=INTERACTIVE_GB_MAX_PAGES, custom_values=custom_values,
                         )
                     st.session_state["last_listings"] = (time.time(), _cres.listings)
                     _run_chains(_cres.listings)
@@ -1267,7 +1286,7 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
                     with st.spinner(t("progress_start")):
                         _ares = run_scan(
                             inventory, Goals(any=True), sources=["gamersberg", "bloxfruitsvalues"],
-                            deep=True, gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
+                            deep=True, gb_max_pages=INTERACTIVE_GB_MAX_PAGES, custom_values=custom_values,
                         )
                     _alist = _ares.listings
                 st.session_state["arb_view3"] = build_arb_view(

@@ -19,6 +19,7 @@ from blox_trade_finder.core.normalize import (
     check_inventory_names,
     inventory_counts,
 )
+from blox_trade_finder.core.overrides import apply_overrides
 from blox_trade_finder.models import Goals, Inventory, Match
 from blox_trade_finder.sources.bloxfruitsvalues import BloxFruitsValuesSource
 from blox_trade_finder.sources.gamersberg import GamersbergSource
@@ -69,6 +70,7 @@ def run_scan(
     store: TradeStore | None = None,
     progress: ScanProgress | None = None,
     gb_max_pages: int | None = None,
+    custom_values: dict | None = None,
 ) -> ScanResult:
     """Fetch, normalize and match. `sources` defaults to all of VALID_SOURCES."""
     if sources is None:
@@ -144,6 +146,7 @@ def run_scan(
 
         _phase(progress, "matching")
         listings = build_listings(gamersberg_raw, catalog) + build_listings_bfv(bfv_raw, catalog)
+        listings = apply_overrides(listings, custom_values)  # user-forced values replace the sites'
         inv_counts = inventory_counts(inventory)
         matches = find_matches(listings, inv_counts, goals)
         logger.info(

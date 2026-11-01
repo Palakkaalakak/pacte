@@ -29,7 +29,9 @@ def item_unit_value(values: dict[str, int], basis: str) -> int:
     return values.get(basis, 0)
 
 
-def value_inventory(inventory: Inventory, catalog: Catalog, basis: str = "gamersberg") -> list[ValuedItem]:
+def value_inventory(
+    inventory: Inventory, catalog: Catalog, basis: str = "gamersberg", custom_values: dict | None = None,
+) -> list[ValuedItem]:
     # Catalog names can carry stray whitespace (e.g. "Scarlet Ghost "), so key on stripped names.
     by_name = {i.name.strip().lower(): i for i in catalog.items}
     merged: dict[str, ValuedItem] = {}
@@ -37,9 +39,12 @@ def value_inventory(inventory: Inventory, catalog: Catalog, basis: str = "gamers
         name = resolved_inventory_name(entry)
         item = by_name.get(name.strip().lower())
         unit = item_unit_value(item.values, basis) if item else 0
+        if custom_values and name.strip().lower() in custom_values:
+            unit = custom_values[name.strip().lower()][1]
+            item = item or True  # known via the override even if the catalog lacks it
         key = name.strip().lower()
         if key in merged:
             merged[key].qty += entry.qty
         else:
-            merged[key] = ValuedItem(item.name if item else name, entry.qty, unit, item is not None and unit > 0)
+            merged[key] = ValuedItem(item.name if item is not None and item is not True else name, entry.qty, unit, item is not None and unit > 0)
     return sorted(merged.values(), key=lambda v: -v.total)

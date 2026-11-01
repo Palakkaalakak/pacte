@@ -180,6 +180,7 @@ class LiveWorker:
         notify_age_minutes: float | None = NOTIFY_MAX_AGE_MINUTES,
         chain_cfg: dict | None,
         arb_cfg: dict | None = None,
+        custom_values: dict | None = None,
         interval_seconds: int = 300,
         gb_max_pages: int | None = None,
         idle_timeout_seconds: int = 900,
@@ -189,6 +190,7 @@ class LiveWorker:
         self.notify_cfg, self.max_age_minutes, self.chain_cfg = notify_cfg, max_age_minutes, chain_cfg
         self.scam_cfg = scam_cfg
         self.arb_cfg = arb_cfg
+        self.custom_values = custom_values
         self.notify_age_minutes = notify_age_minutes
         self.interval, self.gb_max_pages = interval_seconds, gb_max_pages
         self.idle_timeout, self._scan_fn = idle_timeout_seconds, scan_fn
@@ -225,7 +227,7 @@ class LiveWorker:
         try:
             result = self._scan_fn(
                 self.inventory, self.goals, sources=self.sources, deep=True,
-                gb_max_pages=self.gb_max_pages,
+                gb_max_pages=self.gb_max_pages, custom_values=self.custom_values,
             )
             view, self._seen = build_view(
                 result, self.notify_cfg, max_age_minutes=self.max_age_minutes, only_new=True, seen=self._seen,
