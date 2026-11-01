@@ -203,6 +203,7 @@ class LiveWorker:
         self._seen: set[str] | None = None
         self._bfv_store: dict = {}
         self._scan_no = 0
+        self._last_full = 0
         self._last_seen_by_ui = time.time()
         self.state: dict = {
             "view": None, "chains": None, "chains_ts": 0.0, "scans": 0, "alarm_seq": 0,
@@ -235,9 +236,14 @@ class LiveWorker:
             # after one full bloxfruitsvalues fetch we only re-read each item's NEWEST page
             # (merged into a store) — a full refetch every FULL_REFRESH_EVERY scans resyncs
             # anything filled/removed meanwhile. Gamersberg is already incremental via its store.
-            full = self._scan_no % FULL_REFRESH_EVERY == 0
+            # Chains/arbitrage pair listings against the whole book, so while either is on we
+            # also do a full refetch every FULL_REFRESH_EVERY scans to drop filled ads. With
+            # only the normal new-offer scan there is no need — just the newest pages.
+            needs_book = self.chain_cfg is not None or self.arb_cfg is not None
+            full = self._scan_no == 0 or (needs_book and self._scan_no - self._last_full >= FULL_REFRESH_EVERY)
             if full:
                 self._bfv_store = {}
+                self._last_full = self._scan_no
             self._scan_no += 1
             result = self._scan_fn(
                 self.inventory, self.goals, sources=self.sources, deep=True,

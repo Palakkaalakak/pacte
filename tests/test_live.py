@@ -58,3 +58,29 @@ def test_item_max_loss_tolerance() -> None:
     assert notify_reason(mk(10_000_000), cfg) == "Venom"
     assert notify_reason(mk(-51_000_000), cfg) is None
     assert notify_reason(mk(-900_000_000, "Yellow Lightning"), cfg) == "Yellow Lightning"  # no limit set
+
+
+def test_full_refetch_only_when_chains_or_arbitrage_on() -> None:
+    import time as _t
+    calls = []
+
+    def fake_scan(*a, **k):
+        calls.append(k.get("bfv_max_pages"))
+        return ScanResult(matches=[], name_warnings=[], listings=[])
+
+    def run(chain_cfg, n=12):
+        calls.clear()
+        w = LiveWorker(
+            inventory=Inventory(items=[InventoryEntry(name="X")]), goals=Goals(any=True),
+            sources=["gamersberg"], notify_cfg={}, max_age_minutes=None, chain_cfg=chain_cfg,
+            interval_seconds=1, scan_fn=fake_scan,
+        )
+        for _ in range(n):
+            w._scan_once()
+        return list(calls)
+
+    plain = run(None)
+    assert plain[0] is None and all(c == 1 for c in plain[1:])            # new-offer scan: newest page only
+    with_chains = run({"value_basis": "gamersberg", "max_age_minutes": 5, "max_steps": 3,
+                       "min_profit": 0, "target_names": set()})
+    assert with_chains[0] is None and with_chains[10] is None and with_chains[5] == 1
