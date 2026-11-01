@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 NOTIFY_MAX_AGE_MINUTES = 10  # alarm / table only for listings this young
 FAST_REQUEST_INTERVAL = 0.25  # seconds between requests per site (interactive default is 1.0)
 FAST_BFV_WORKERS = 6
+MIN_LOOP_SECONDS = 1  # floor between scan starts, even in constant mode
 FULL_REFRESH_EVERY = 10  # full bloxfruitsvalues refetch every N scans
 
 
@@ -290,7 +291,9 @@ class LiveWorker:
         while not self._stop.is_set():
             self._scan_once()
             started = time.time()
-            while not self._stop.is_set() and time.time() < started + self.interval:  # interval may change live
+            # interval 0 = constant mode: go again right away, with a 1 s floor so a fast scan
+            # can never turn into a tight request loop.
+            while not self._stop.is_set() and time.time() < started + max(self.interval, MIN_LOOP_SECONDS):  # interval may change live
                 if time.time() - self._last_seen_by_ui > self.idle_timeout:
                     self._stop.set()  # browser tab gone — don't scan forever
                     return

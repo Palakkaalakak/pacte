@@ -84,3 +84,22 @@ def test_full_refetch_only_when_chains_or_arbitrage_on() -> None:
     with_chains = run({"value_basis": "gamersberg", "max_age_minutes": 5, "max_steps": 3,
                        "min_profit": 0, "target_names": set()})
     assert with_chains[0] is None and with_chains[10] is None and with_chains[5] == 1
+
+
+def test_constant_mode_rescans_back_to_back() -> None:
+    import time as _t
+    stamps = []
+
+    def fake_scan(*a, **k):
+        stamps.append(_t.time())
+        return ScanResult(matches=[], name_warnings=[], listings=[])
+
+    w = LiveWorker(
+        inventory=Inventory(items=[InventoryEntry(name="X")]), goals=Goals(any=True),
+        sources=["gamersberg"], notify_cfg={}, max_age_minutes=None, chain_cfg=None,
+        interval_seconds=0, scan_fn=fake_scan,
+    )
+    w.start()
+    _t.sleep(3.5)
+    w.stop()
+    assert len(stamps) >= 3 and all(b - a >= 0.9 for a, b in zip(stamps, stamps[1:]))

@@ -980,8 +980,10 @@ st.number_input(
 )
 live_mode = st.toggle(t("live_toggle"), value=False, key="live_mode")
 live_interval = st.radio(
-    "Scan every", [300, 120, 60, 30], horizontal=True, key="live_interval_s",
-    format_func=lambda sec: f"{sec // 60} min" if sec >= 60 else f"{sec} s",
+    "Scan every", [300, 120, 60, 30, 0], horizontal=True, key="live_interval_s",
+    format_func=lambda sec: "⚡ Constant" if sec == 0 else (f"{sec // 60} min" if sec >= 60 else f"{sec} s"),
+    help="Constant = start the next scan as soon as the last one finishes (only the newest "
+         "offers are fetched), so new offers show up within seconds. Hits the sites hardest.",
 )
 if notify_cfg and st.button(t("notify_test")):
     _play_alarm(0)
@@ -1180,8 +1182,8 @@ def _live_panel() -> None:
         if snap["scanning"]:
             st.caption("🔄 Live checker: scanning…")
         elif snap["last_scan_ts"]:
-            left = max(0, int(worker.interval - (time.time() - snap["last_scan_ts"])))
-            st.caption(f"🟢 Live checker running — scan #{snap['scans']}, next in {left}s")
+            left = max(0, int(worker.interval - (time.time() - snap["last_scan_ts"]))) if worker.interval else 0
+            st.caption(f"🟢 Live checker running — scan #{snap['scans']}, " + (f"next in {left}s" if worker.interval else "⚡ constant mode"))
         if snap["error"]:
             st.error(t("scan_failed", error=snap["error"]))
         if snap["alarm_seq"] > ss.get("alarm_seq_played", 0):
