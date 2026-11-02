@@ -5,6 +5,10 @@
       "qty": 1
     },
     {
+      "name": "Shadow",
+      "qty": 1
+    },
+    {
       "name": "Gravity",
       "qty": 1
     },
@@ -17,15 +21,15 @@
       "qty": 1
     },
     {
+      "name": "Yeti",
+      "qty": 1
+    },
+    {
       "name": "Hellfire Gas",
       "qty": 1
     },
     {
       "name": "Lightning",
-      "qty": 1
-    },
-    {
-      "name": "Control",
       "qty": 1
     }
   ]
