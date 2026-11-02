@@ -178,22 +178,13 @@ def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dic
         "ts": time.time(),
         "gaps": [{
             "Item": g.name,
-            **{SITE_VALUE_KEYS[k]: (format_value(g.values[k]) if k in g.values else "") for k in gap_cols},
-            "Class": g.cls,
-            # amount (ratio): "Raw" is the sites' numbers as published, "Effective" is after removing
-            # the sites' usual price level for this kind of item - the one that is actually an edge.
+            # amount (ratio): "Effective" removes the sites' usual price level for this kind of item
+            # (the number that is actually an edge); "Raw" is the sites' numbers as published.
             "Effective gap": f"{format_value(g.gap)} ({g.ratio:.2f}x)",
             "Raw gap": f"{format_value(g.raw_gap)} ({g.raw_ratio:.2f}x)",
-            "Higher on": g.higher_on, "Lower on": g.lower_on,
+            "Higher on": g.higher_on, "Lower on": g.lower_on, "Class": g.cls,
+            **{SITE_VALUE_KEYS[k]: (format_value(g.values[k]) if k in g.values else "") for k in gap_cols},
         } for g in gaps[:300]],
-        "norms": [
-            {"Site": SITE_VALUE_KEYS.get(src, src), "Typical give ÷ ask": f"{n:.2f}", "Listings": c}
-            for src, (n, c) in sorted(site_norms(listings, cfg["value_basis"]).items())
-        ],
-        "inflation": [
-            {"Class": cls, **{SITE_VALUE_KEYS[k]: f"{lvl:.2f}x ({n})" for k, (lvl, n) in by_site.items() if k in SITE_VALUE_KEYS}}
-            for cls, by_site in sorted(platform_inflation(listings).items())
-        ],
         "trades": [{
             "Item": x.item,
             "Buy: you pay": ", ".join(i.name for i in x.buy.want),

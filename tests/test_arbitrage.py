@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from collections import Counter
 from blox_trade_finder.core.arbitrage import find_item_arbitrage, item_gaps
 from blox_trade_finder.models import CatalogItem, Listing
 
@@ -109,3 +110,14 @@ def test_gap_amounts_carry_effective_and_raw_values() -> None:
     g = next(g for g in item_gaps(ls, min_ratio=1.25) if g.name == "Odd")
     assert g.raw_gap == 60 and round(g.raw_ratio, 2) == 1.60
     assert g.gap == int(160 / 1.10 - 100) and round(g.ratio, 2) == 1.45      # 45 effective vs 60 raw
+
+
+def test_gap_rows_lead_with_the_effective_gap() -> None:
+    from blox_trade_finder.live import build_arb_view
+    a = CatalogItem(id=1, name="Venom", values={"gamersberg": 60, "tradehub": 25, "fantasyblox": 100})
+    v = build_arb_view([_l("x", [CatalogItem(id=2, name="Pain", values={"gamersberg": 10})], [a])],
+                       cfg=dict(value_basis="gamersberg", min_pct=0.1, cross_site_only=True, max_age_minutes=None,
+                                min_ratio=1.001, only_mine=False), inventory_counts=Counter(), scam_cfg=None)
+    cols = list(v["gaps"][0])
+    assert cols[:3] == ["Item", "Effective gap", "Raw gap"]            # gap amounts right after the item
+    assert cols.index("Higher on") < cols.index("Gamersberg")          # per-site values come last
