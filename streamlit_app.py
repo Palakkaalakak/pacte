@@ -1037,6 +1037,7 @@ def _arb_cfg() -> dict:
         value_basis=ss.get("arb_basis", "gamersberg"), min_pct=ss.get("arb_pct", 10) / 100,
         cross_site_only=ss.get("arb_cross", True), max_age_minutes=ss.get("arb_age", 10) or None,
         min_ratio=ss.get("arb_ratio", 1.25), only_mine=ss.get("arb_mine", True),
+        judge_by_norm=ss.get("arb_norm", False),
     )
 
 
@@ -1339,6 +1340,12 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
         "Value basis for profit", ["gamersberg", "bloxfruitsvalues", "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg"],
         format_func=lambda k: VALUE_BASIS_LABELS[k], key="arb_basis",
     )
+    st.checkbox(
+        "Judge edge against each site's usual deal (not just break-even)", value=False, key="arb_norm",
+        help="Every site's posters ask for more than they give, by a different margin. With this on, "
+             "'min profit %' is measured against the usual spread of the two sites involved "
+             "(real profit is still required).",
+    )
     arb_mine = st.checkbox("Only trades I can make with my inventory", value=True, key="arb_mine")
     st.checkbox("🔁 Also search arbitrage on every live scan (runs alongside the live checker)", value=False, key="arb_auto")
     if st.button("⚖️ Find Arbitrage", use_container_width=True, key="arb_btn"):
@@ -1380,6 +1387,12 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
             )
         else:
             st.info("No same-item arbitrage right now.")
+        if _arb.get("norms"):
+            st.subheader("Each site's usual spread")
+            st.caption("Typical value a poster gives ÷ value they ask for, in Gamersberg-scale numbers. Below 1.00 "
+                       "means posters on that site ask for more than they give. 'vs site norm' in the arbitrage "
+                       "table compares a deal with the usual round trip between its two sites.")
+            st.dataframe(pd.DataFrame(_arb["norms"]), use_container_width=True, hide_index=True)
         if _arb.get("inflation"):
             st.subheader("Platform price levels (vs Gamersberg)")
             st.caption("Typical price ratio of each site against Gamersberg, per kind of item, with the number "

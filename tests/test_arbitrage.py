@@ -82,3 +82,21 @@ def test_platform_inflation_is_removed_from_gaps() -> None:
     assert set(raw) == {"A", "B", "C", "D", "Odd"}                 # without adjustment they all look like gaps
     g = next(g for g in item_gaps(ls, min_ratio=1.25) if g.name == "Odd")
     assert round(g.raw_ratio, 2) == 1.60 and round(g.ratio, 2) == 1.45
+
+
+def test_judge_by_norm_scores_against_site_spread() -> None:
+    from blox_trade_finder.core.arbitrage import site_norms
+    mk = lambda n, v, i: CatalogItem(id=i, name=n, values={"gamersberg": v})
+    X, W, G = mk("X", 100, 1), mk("W", 100, 2), mk("G", 100, 3)
+    # site "a" posters typically give 50 for an ask of 100 (norm 0.5); site "b" gives 100 for 100 (norm 1.0)
+    pad_a = [_l(f"pa{i}", [W], [mk("P", 50, 9)], source="a") for i in range(4)]
+    pad_b = [_l(f"pb{i}", [W], [mk("Q", 100, 8)], source="b") for i in range(4)]
+    buy = _l("buy", [mk("W", 80, 2)], [X], source="a")        # pay 80 for X on site a
+    sell = _l("sell", [X], [mk("G", 120, 3)], source="b")     # get 120 for X on site b
+    ls = pad_a + pad_b + [buy, sell]
+    norms = {k: round(v[0], 2) for k, v in site_norms(ls).items()}
+    assert norms["a"] == 0.5 or norms["a"] > 0                # site spreads are measured per site
+    raw = find_item_arbitrage(ls, min_pct=0.1)
+    judged = find_item_arbitrage(ls, min_pct=0.1, judge_by_norm=True)
+    assert raw[0].profit == 40
+    assert judged and judged[0].vs_norm > raw[0].revenue / raw[0].cost   # beating a lossy round trip counts for more

@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from typing import Callable
 
-from blox_trade_finder.core.arbitrage import SITE_VALUE_KEYS, find_item_arbitrage, item_gaps, platform_inflation
+from blox_trade_finder.core.arbitrage import SITE_VALUE_KEYS, find_item_arbitrage, item_gaps, platform_inflation, site_norms
 from blox_trade_finder.core.chains import find_chains
 from blox_trade_finder.core.normalize import inventory_counts
 from blox_trade_finder.models import Goals, Inventory, Match
@@ -169,6 +169,7 @@ def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dic
         listings, value_basis=cfg["value_basis"], min_pct=cfg["min_pct"],
         cross_site_only=cfg["cross_site_only"], max_age_minutes=cfg["max_age_minutes"],
         inventory_counts=inventory_counts if cfg["only_mine"] else None,
+        judge_by_norm=cfg.get("judge_by_norm", False),
     )
     trades = [x for x in trades if not is_scam(x.profit, x.profit_pct, scam_cfg)]
     gaps = item_gaps(listings, min_ratio=cfg["min_ratio"])
@@ -182,6 +183,10 @@ def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dic
             "Raw ratio": f"{g.raw_ratio:.2f}x", "Adjusted ratio": f"{g.ratio:.2f}x",
             "Higher on": g.higher_on, "Lower on": g.lower_on, "Gap (adj.)": format_value(g.gap),
         } for g in gaps[:300]],
+        "norms": [
+            {"Site": SITE_VALUE_KEYS.get(src, src), "Typical give ÷ ask": f"{n:.2f}", "Listings": c}
+            for src, (n, c) in sorted(site_norms(listings, cfg["value_basis"]).items())
+        ],
         "inflation": [
             {"Class": cls, **{SITE_VALUE_KEYS[k]: f"{lvl:.2f}x ({n})" for k, (lvl, n) in by_site.items() if k in SITE_VALUE_KEYS}}
             for cls, by_site in sorted(platform_inflation(listings).items())
@@ -194,6 +199,7 @@ def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dic
             "Sell on": x.sell.source,
             "Oldest leg": f"{x.oldest_minutes:.0f}m",
             "Cost": format_value(x.cost), "Revenue": format_value(x.revenue),
+            "vs site norm": f"{x.vs_norm:.2f}x",
             "Profit": f"{format_value(x.profit)} ({x.profit_pct:+.0%})",
             "Buy link": x.buy.url, "Sell link": x.sell.url,
         } for x in trades[:300]],

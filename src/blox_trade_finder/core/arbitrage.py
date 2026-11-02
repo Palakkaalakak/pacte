@@ -96,6 +96,14 @@ class ItemArb:
     sell: Listing     # wants X, gives `receive` items
     cost: int         # value of what you pay for X (buy.want)
     revenue: int      # value of what you receive for X (sell.give)
+    buy_norm: float = 1.0   # that site's typical (what a poster gives)/(what it asks), same units
+    sell_norm: float = 1.0
+
+    @property
+    def vs_norm(self) -> float:
+        """Round trip relative to what a typical buy-here/sell-there round trip returns. 1.00 means
+        exactly the usual deal for those two sites; 1.30 means 30% better than their usual."""
+        return (self.revenue / self.cost) / (self.buy_norm * self.sell_norm)
 
     @property
     def profit(self) -> int:
@@ -169,6 +177,23 @@ def platform_inflation(listings: list[Listing]) -> dict[str, dict[str, tuple[flo
     }
 
 
+def site_norms(listings: list[Listing], value_basis: str = GB) -> dict[str, tuple[float, int]]:
+    """source -> (median of value(poster gives)/value(poster asks), listings used).
+
+    Posters ask for more than they give (the taker's premium), and how much differs by site.
+    Uniform changes in a value table cancel out in barter, but this spread does not, so it is
+    the honest yardstick for 'is this deal good for THIS site?'."""
+    import statistics
+    maps = value_maps(listings)
+    per: dict[str, list[float]] = {}
+    for lst in listings:
+        give = sum(_value(i, value_basis, maps) for i in lst.give)
+        want = sum(_value(i, value_basis, maps) for i in lst.want)
+        if give > 0 and want > 0 and all(_value(i, value_basis, maps) > 0 for i in (*lst.give, *lst.want)):
+            per.setdefault(lst.source, []).append(give / want)
+    return {src: (statistics.median(r), len(r)) for src, r in per.items() if len(r) >= MIN_CLASS_ITEMS}
+
+
 def item_gaps(listings: list[Listing], *, min_ratio: float = 1.25, min_gap: int = 0,
               adjust_inflation: bool = True) -> list[ItemGap]:
     """Items two or more sites price differently. With `adjust_inflation` each site's value is
@@ -200,6 +225,7 @@ def find_item_arbitrage(
     per_item: int = 5,
     max_age_minutes: float | None = None,
     now: datetime | None = None,
+    judge_by_norm: bool = False,
 ) -> list[ItemArb]:
     """Same-item arbitrage. For every item X: a listing that GIVES exactly one X
     (the buy) paired with a listing that WANTS exactly one X (the sell). You pay the
@@ -207,6 +233,7 @@ def find_item_arbitrage(
     Both legs are valued with ONE common basis so the profit is real, not a valuation
     artifact. `inventory_counts` restricts buys to ones you can pay for."""
     maps = value_maps(listings)
+    norms = {src: n for src, (n, _) in site_norms(listings, value_basis).items()}
     now = now or datetime.now(timezone.utc)
     if max_age_minutes:  # stale ads are probably filled or the poster is offline
         def _fresh(l: Listing) -> bool:
@@ -246,23 +273,35 @@ def find_item_arbitrage(
         best_rev = sell_list[0][0]
         top: list[tuple[float, int, ItemArb]] = []          # min-heap of the best `per_item` pairs
         for cost, buy in buy_list:
-            if best_rev <= cost or (best_rev - cost) / cost < min_pct:
-                break                                       # costs only rise from here: no pair can qualify
-            if len(top) >= per_item and (best_rev - cost) / cost <= top[0][0]:
-                break                                       # can't beat what we already hold
+            if best_rev <= cost:
+                break                                       # costs only rise from here: no real profit left
+            if not judge_by_norm:
+                if (best_rev - cost) / cost < min_pct:
+                    break
+                if len(top) >= per_item and (best_rev - cost) / cost <= top[0][0]:
+                    break                                   # can't beat what we already hold
             for rev, sell in sell_list:
-                if rev <= cost or (rev - cost) / cost < min_pct:
-                    break                                   # sells only fall from here
+                if rev <= cost:
+                    break                                   # sells only fall from here: no real profit
                 if buy is sell or (cross_site_only and buy.source == sell.source):
                     continue
-                pct = (rev - cost) / cost
+                bn, sn = norms.get(buy.source, 1.0), norms.get(sell.source, 1.0)
+                # Real profit is always required; judge_by_norm additionally scores the deal
+                # against the two sites' usual spread instead of against break-even.
+                pct = ((rev / cost) / (bn * sn) - 1) if judge_by_norm else (rev - cost) / cost
+                if pct < min_pct:
+                    if judge_by_norm:
+                        continue
+                    break                                   # sells only fall from here
                 if len(top) >= per_item and pct <= top[0][0]:
+                    if judge_by_norm:
+                        continue
                     break
-                arb = ItemArb(buy.give[0].name, buy, sell, cost, rev)
+                arb = ItemArb(buy.give[0].name, buy, sell, cost, rev, bn, sn)
                 if len(top) < per_item:
                     heapq.heappush(top, (pct, id(arb), arb))
                 else:
                     heapq.heapreplace(top, (pct, id(arb), arb))
         out.extend(a for _, _, a in top)
-    out.sort(key=lambda a: -a.profit_pct)
+    out.sort(key=(lambda a: -a.vs_norm) if judge_by_norm else (lambda a: -a.profit_pct))
     return out
