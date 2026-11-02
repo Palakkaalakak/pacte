@@ -84,8 +84,13 @@ class ItemGap:
 
     @property
     def gap(self) -> int:
+        """Effective gap: high minus low once every site is on Gamersberg's price level."""
         v = self._vals(True)
         return int(max(v.values()) - min(v.values()))
+
+    @property
+    def raw_gap(self) -> int:
+        return max(self.values.values()) - min(self.values.values())
 
 
 @dataclass

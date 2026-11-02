@@ -180,8 +180,11 @@ def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dic
             "Item": g.name,
             **{SITE_VALUE_KEYS[k]: (format_value(g.values[k]) if k in g.values else "") for k in gap_cols},
             "Class": g.cls,
-            "Raw ratio": f"{g.raw_ratio:.2f}x", "Adjusted ratio": f"{g.ratio:.2f}x",
-            "Higher on": g.higher_on, "Lower on": g.lower_on, "Gap (adj.)": format_value(g.gap),
+            # amount (ratio): "Raw" is the sites' numbers as published, "Effective" is after removing
+            # the sites' usual price level for this kind of item - the one that is actually an edge.
+            "Effective gap": f"{format_value(g.gap)} ({g.ratio:.2f}x)",
+            "Raw gap": f"{format_value(g.raw_gap)} ({g.raw_ratio:.2f}x)",
+            "Higher on": g.higher_on, "Lower on": g.lower_on,
         } for g in gaps[:300]],
         "norms": [
             {"Site": SITE_VALUE_KEYS.get(src, src), "Typical give ÷ ask": f"{n:.2f}", "Listings": c}

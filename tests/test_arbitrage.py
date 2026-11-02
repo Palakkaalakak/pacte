@@ -100,3 +100,12 @@ def test_judge_by_norm_scores_against_site_spread() -> None:
     judged = find_item_arbitrage(ls, min_pct=0.1, judge_by_norm=True)
     assert raw[0].profit == 40
     assert judged and judged[0].vs_norm > raw[0].revenue / raw[0].cost   # beating a lossy round trip counts for more
+
+
+def test_gap_amounts_carry_effective_and_raw_values() -> None:
+    mk = lambda n, gb, th, i: CatalogItem(id=i, name=n, type="Natural", values={"gamersberg": gb, "tradehub": th})
+    items = [mk("A", 100, 110, 1), mk("B", 200, 220, 2), mk("C", 300, 330, 3), mk("D", 400, 440, 4), mk("Odd", 100, 160, 5)]
+    ls = [_l(f"l{i}", [it], [items[(i + 1) % 5]]) for i, it in enumerate(items)]
+    g = next(g for g in item_gaps(ls, min_ratio=1.25) if g.name == "Odd")
+    assert g.raw_gap == 60 and round(g.raw_ratio, 2) == 1.60
+    assert g.gap == int(160 / 1.10 - 100) and round(g.ratio, 2) == 1.45      # 45 effective vs 60 raw
