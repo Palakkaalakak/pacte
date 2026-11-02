@@ -30,6 +30,7 @@ BFV_LATEST_PAGE_SIZE = 25  # newest ads fetched per poll of bloxfruitsvalues' gl
 FAIL_STREAK_TO_REPORT = 6  # consecutive failed polls of one source before showing an error
 BFV_POLLERS = 3  # overlapping pollers: one slow response never stalls polling
 CA_MIN_GAP = 3.0  # min seconds between chain/arbitrage recomputes
+NEW_HIGHLIGHT_SECONDS = 30  # how long a new trade stays green on screen
 FEED_MAX = 200  # newest offers kept on screen in live mode
 MIN_LOOP_SECONDS = 0.5  # floor between scan starts, even in constant mode
 FULL_REFRESH_EVERY = 10  # full bloxfruitsvalues refetch every N scans
@@ -137,9 +138,11 @@ def build_view(
         if seen is not None else set()
     )
     new_seen = (seen or set()) | set(keys.values())
+    # Trades not seen in any earlier scan (never on the silent first scan of a source).
+    fresh = {id(m) for m in matches if seen is not None and keys[id(m)] not in seen}
     if only_new and seen is not None:
         matches = [m for m in matches if keys[id(m)] not in seen]
-    matches = sorted(matches, key=lambda m: id(m) not in new_hits)  # new hits on top
+    matches = sorted(matches, key=lambda m: (id(m) not in new_hits, id(m) not in fresh))  # hits, then new, on top
     rows = [{
         "notify": (("🆕🔔 " if id(m) in new_hits else "🔔 ") + reasons[id(m)]) if reasons.get(id(m)) else "",
         "source": m.listing.source,
@@ -152,7 +155,7 @@ def build_view(
         "conf": f"{m.confidence}%",
         "posted": m.listing.created_at,
         "url": m.listing.url,
-        "is_new": id(m) in new_hits,
+        "is_new": id(m) in fresh,
     } for m in matches]
     view = {
         "rows": rows, "count": len(rows), "new_hits": len(new_hits),
@@ -353,12 +356,16 @@ class LiveWorker:
                 # a hit would vanish at the next scan (seconds later in constant mode).
                 hits_this_scan = view["new_hits"]
                 this_scan = {r["url"] for r in view["rows"]}
+                now = time.time()
                 for row in view["rows"]:
                     if row["url"] not in self._feed_urls:
                         self._feed_urls.add(row["url"])
+                        # first_seen drives the green "new" highlight for a short while on screen
+                        row["first_seen"] = now if row["is_new"] else None
                         self._feed.insert(0, row)
-                for row in self._feed:
-                    row["is_new"] = row["is_new"] and row["url"] in this_scan
+                if self.max_age_minutes:   # the live table only ever shows trades posted within the age limit
+                    cutoff = datetime.now(timezone.utc).timestamp() - self.max_age_minutes * 60
+                    self._feed = [r for r in self._feed if _aware(r["posted"]).timestamp() >= cutoff]
                 del self._feed[FEED_MAX:]
                 view = {**view, "rows": list(self._feed), "count": len(self._feed), "new_hits": hits_this_scan}
                 for src in sources:

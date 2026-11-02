@@ -172,3 +172,29 @@ def test_exclude_permanents_with_allow_list() -> None:
     assert not has_blocked_item(Listing(give=mk("Permanent Dragon"), want=mk("Pain"), **base), cfg)
     assert not has_blocked_item(Listing(give=mk("Venom"), want=mk("Pain"), **base), cfg)
     assert not has_blocked_item(Listing(give=mk("Permanent Venom"), want=mk("Pain"), **base), {"exclude_permanent": False})
+
+
+def test_live_feed_drops_old_rows_and_marks_only_new_ones() -> None:
+    from datetime import timedelta
+    from blox_trade_finder.models import CatalogItem, Listing, Match
+
+    def mk(i, age_min):
+        l = Listing(id=str(i), source="g", url=f"u{i}", poster_name="p", poster_rating=1.0, wfl={},
+                    give=[CatalogItem(id=1, name="Venom")], want=[CatalogItem(id=2, name="Pain")],
+                    created_at=datetime.now(timezone.utc) - timedelta(minutes=age_min))
+        return Match(listing=l, give_value=1, get_value=2, delta=1, profit_pct=1.0, demand=1,
+                     confidence=50, score=1.0, reasons=[], verdict="win")
+
+    batches = [[mk(1, 1), mk(2, 20)], [mk(1, 1), mk(2, 20), mk(3, 0)]]
+    it = iter(batches)
+    w = LiveWorker(
+        inventory=Inventory(items=[InventoryEntry(name="X")]), goals=Goals(any=True),
+        sources=["gamersberg"], notify_cfg={}, max_age_minutes=5, chain_cfg=None,
+        interval_seconds=1, scan_fn=lambda *a, **k: ScanResult(matches=next(it), name_warnings=[], listings=[]),
+    )
+    w._scan_once(); w._scan_once()
+    rows = w.snapshot()["view"]["rows"]
+    assert [r["url"] for r in rows] == ["u3", "u1"]          # 20-minute-old u2 never shown; newest first
+    by = {r["url"]: r for r in rows}
+    assert by["u3"]["first_seen"] is not None                  # found after the baseline scan -> highlighted
+    assert by["u1"]["first_seen"] is None                      # part of the first scan -> not green

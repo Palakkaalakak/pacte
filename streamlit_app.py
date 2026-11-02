@@ -39,7 +39,7 @@ import pandas as pd
 import streamlit as st
 
 from blox_trade_finder.models import Goals, Inventory, InventoryEntry
-from blox_trade_finder.live import build_arb_view, NOTIFY_MAX_AGE_MINUTES, LiveWorker, DEFAULT_BLOCKED_ITEMS, build_view, filter_chains, filter_listings
+from blox_trade_finder.live import NEW_HIGHLIGHT_SECONDS, build_arb_view, NOTIFY_MAX_AGE_MINUTES, LiveWorker, DEFAULT_BLOCKED_ITEMS, build_view, filter_chains, filter_listings
 from blox_trade_finder.core.overrides import CUSTOM_VALUES, DEFAULT_OVERRIDDEN, build_overrides
 from blox_trade_finder.scan import ScanProgress, run_scan
 from blox_trade_finder.sources.extra_sites import EXTRA_SITES, PERIPHERY_SITES
@@ -1034,7 +1034,7 @@ if use_periphery:
 # ------------------------------------------------------------------- action
 find_clicked = st.button(t("find_trades"), type="primary", use_container_width=True)
 st.number_input(
-    "Hide trades older than (minutes, 0 = show all)", min_value=0, value=0, step=1, key="max_age_min",
+    "Hide trades older than (minutes, 0 = show all)", min_value=0, value=5, step=1, key="max_age_min",
 )
 live_mode = st.toggle(t("live_toggle"), value=False, key="live_mode")
 live_interval = st.radio(
@@ -1262,7 +1262,13 @@ def _render_view(view: dict) -> None:
         t("col_confidence"): r["conf"], t("col_posted"): _posted_ago(r["posted"]),
         t("col_link"): r["url"],
     } for r in view["rows"]])
-    flags = [r["is_new"] for r in view["rows"]]
+    now = time.time()
+    # Live rows carry first_seen: green for NEW_HIGHLIGHT_SECONDS after they first appeared. Manual
+    # scan rows have no first_seen, so they use their is_new flag (not seen in an earlier scan).
+    flags = [
+        bool(r["first_seen"] and now - r["first_seen"] < NEW_HIGHLIGHT_SECONDS) if "first_seen" in r else bool(r["is_new"])
+        for r in view["rows"]
+    ]
     st.dataframe(
         df.style.apply(
             lambda row: ["background-color: #1faa59; color: white; font-weight: bold"] * len(row)
