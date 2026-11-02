@@ -194,7 +194,7 @@ def site_norms(listings: list[Listing], value_basis: str = GB) -> dict[str, tupl
     return {src: (statistics.median(r), len(r)) for src, r in per.items() if len(r) >= MIN_CLASS_ITEMS}
 
 
-def item_gaps(listings: list[Listing], *, min_ratio: float = 1.25, min_gap: int = 0,
+def item_gaps(listings: list[Listing], *, min_ratio: float = 1.001, min_gap: int = 0,
               adjust_inflation: bool = True) -> list[ItemGap]:
     """Items two or more sites price differently. With `adjust_inflation` each site's value is
     first divided by that site's typical level for the item's class (see platform_inflation), so

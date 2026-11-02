@@ -1036,7 +1036,7 @@ def _arb_cfg() -> dict:
     return dict(
         value_basis=ss.get("arb_basis", "gamersberg"), min_pct=ss.get("arb_pct", 10) / 100,
         cross_site_only=ss.get("arb_cross", True), max_age_minutes=ss.get("arb_age", 10) or None,
-        min_ratio=ss.get("arb_ratio", 1.25), only_mine=ss.get("arb_mine", True),
+        min_ratio=ss.get("arb_ratio", 1.001), only_mine=ss.get("arb_mine", True),
         judge_by_norm=ss.get("arb_norm", False),
     )
 
@@ -1330,7 +1330,10 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
         "items the two sites price differently."
     )
     arb_pct = st.number_input("Min profit % (on either site's values)", 0, None, 10, step=5, key="arb_pct")
-    arb_ratio = st.number_input("Min item value ratio for the gap table (x)", 1.0, None, 1.25, step=0.05, key="arb_ratio")
+    arb_ratio = st.number_input(
+        "Min gap after adjusting for site price levels (x, 1.001 = anything above the average)",
+        1.0, None, 1.001, step=0.01, format="%.3f", key="arb_ratio",
+    )
     arb_age = st.number_input(
         "Max age of each listing (minutes, 0 = any)", 0, None, 10, step=1, key="arb_age",
         help="Older ads are likely already filled or the poster is offline.",
