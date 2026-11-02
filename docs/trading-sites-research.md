@@ -15,7 +15,7 @@ response checked for structured trade data.
 
 All four are resolved against the Gamersberg catalog by item name, so every site is priced with
 the same numbers and results stay comparable. Spelling differences are handled by an alias table
-(`Dragon (West)` → `West Dragon`, `Magnet` → `Magnet Fruit`, `Hellfire` → `Hellfire Gas`, ...). A
+(`Dragon (West)` → `West Dragon`, `Magnet` → `Magnet Fruit`, ...). A
 trade containing an item that can't be resolved (or a placeholder like "Or"/"Adds") is skipped
 rather than guessed.
 
@@ -34,3 +34,15 @@ Pick sites in **4. Where to look** (multiselect). Gamersberg and bloxfruitsvalue
 default; the four new ones are opt-in. In Live mode with **⚡ Constant**, every site gets its own
 polling loop paced to what that site can take (FantasyBlox 1 s, TradeBloxFruit and
 BloxFruitsValues.gg 3 s, Trade Hub 15 s).
+
+## Validation (2026-11-02)
+
+For each new site I read raw ads straight from its API, built an inventory containing exactly what
+the poster asks for, and checked the scanner returns that ad with the same items on both sides.
+Result: 8 of 11 ads came back with exactly the raw items; the other 3 were correctly rejected by
+the in-game 40% Beli-balance rule (the game itself would block those trades). A Gravity-only
+inventory returned no trades from any site, as it should.
+
+Short name `Hellfire` (very common on FantasyBlox) is deliberately NOT aliased to `Hellfire Gas`:
+ads offering e.g. an Ember Dragon (7.6B) for "Hellfire" only look like a +1,250% win if that guess
+is right, and it is unverified.

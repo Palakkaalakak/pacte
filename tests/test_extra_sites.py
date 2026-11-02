@@ -25,7 +25,7 @@ def test_aliases_and_permanent_resolution() -> None:
     by = {i.name.lower(): i for i in _cat().items}
     assert _resolve("Dragon (West)", False, by).name == "West Dragon"
     assert _resolve("Magnet", False, by).name == "Magnet Fruit"
-    assert _resolve("Hellfire", False, by).name == "Hellfire Gas"
+    assert _resolve("Hellfire", False, by) is None          # ambiguous short name: never guessed
     assert _resolve("Venom", True, by).name == "Permanent Venom"
     assert _resolve("Offers", False, by) is None            # placeholder item -> not a definite trade
 

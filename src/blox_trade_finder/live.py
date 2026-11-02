@@ -328,6 +328,7 @@ class LiveWorker:
                 self.state.update(
                     view=view, scans=self.state["scans"] + 1, last_scan_ts=time.time(),
                     error="; ".join(self._errors.values()) or None, listings=(time.time(), book),
+                    site_counts={k: len(v) for k, v in self._src_listings.items()},
                 )
                 if chains is not None:
                     self.state.update(chains=chains, chains_ts=time.time())

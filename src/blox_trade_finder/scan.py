@@ -29,8 +29,8 @@ from blox_trade_finder.store import TradeStore
 logger = logging.getLogger(__name__)
 
 BFV_STORE_MAX = 3000
-DEFAULT_SOURCES = ("gamersberg", "bloxfruitsvalues")  # extra sites are opt-in
-VALID_SOURCES = (*DEFAULT_SOURCES, *EXTRA_SITES)
+VALID_SOURCES = ("gamersberg", "bloxfruitsvalues", *EXTRA_SITES)
+DEFAULT_SOURCES = VALID_SOURCES  # every site, unless the caller narrows it
 
 # Hard ceiling on how long we wait for either source's fetch thread. Every
 # individual HTTP request already has its own timeout + bounded retries, but a

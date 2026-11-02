@@ -966,9 +966,9 @@ SITE_LABELS = {
     **{sid: cls.label for sid, cls in EXTRA_SITES.items()},
 }
 selected_sources = st.multiselect(
-    "Sites to scan", list(SITE_LABELS), default=["gamersberg", "bloxfruitsvalues"],
+    "Sites to scan", list(SITE_LABELS), default=list(SITE_LABELS),
     format_func=lambda sid: SITE_LABELS[sid], help=t("sources_help"), key="sources_pick",
-) or ["gamersberg", "bloxfruitsvalues"]
+) or list(SITE_LABELS)
 
 # ------------------------------------------------------------------- action
 find_clicked = st.button(t("find_trades"), type="primary", use_container_width=True)
@@ -1181,6 +1181,8 @@ def _live_panel() -> None:
         elif snap["last_scan_ts"]:
             left = max(0, int(worker.interval - (time.time() - snap["last_scan_ts"]))) if worker.interval else 0
             st.caption(f"🟢 Live checker running — scan #{snap['scans']}, " + (f"next in {left}s" if worker.interval else "⚡ constant mode"))
+        if snap.get("site_counts"):
+            st.caption("📡 " + " · ".join(f"{SITE_LABELS.get(k, k)} {v}" for k, v in snap["site_counts"].items()))
         if snap["error"]:
             st.error(t("scan_failed", error=snap["error"]))
         if snap["alarm_seq"] > ss.get("alarm_seq_played", 0):
