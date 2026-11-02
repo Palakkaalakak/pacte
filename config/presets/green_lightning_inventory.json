@@ -6,7 +6,7 @@
     },
     {
       "name": "Shadow",
-      "qty": 2
+      "qty": 1
     },
     {
       "name": "Torment Pain",
@@ -38,7 +38,7 @@
     },
     {
       "name": "Yeti",
-      "qty": 2
+      "qty": 1
     },
     {
       "name": "T-Rex",
@@ -66,6 +66,10 @@
     },
     {
       "name": "Lightning",
+      "qty": 1
+    },
+    {
+      "name": "Control",
       "qty": 1
     }
   ]
