@@ -50,7 +50,8 @@ class ItemGap:
     name: str
     values: dict[str, int] = field(default_factory=dict)   # site id -> that site's raw value (> 0)
     cls: str = ""
-    adjusted: dict[str, float] = field(default_factory=dict)  # values put on Gamersberg's price level
+    adjusted: dict[str, float] = field(default_factory=dict)  # values put on Gamersberg's price level (per class)
+    adjusted_platform: dict[str, float] = field(default_factory=dict)  # same, using ONE level per site for all classes
 
     def _vals(self, adjusted: bool) -> dict:
         return self.adjusted if (adjusted and self.adjusted) else self.values
@@ -200,12 +201,28 @@ def site_norms(listings: list[Listing], value_basis: str = GB) -> dict[str, tupl
     return {src: (statistics.median(r), len(r)) for src, r in per.items() if len(r) >= MIN_CLASS_ITEMS}
 
 
+def platform_wide_inflation(listings: list[Listing]) -> dict[str, tuple[float, int]]:
+    """site -> (median price ratio vs Gamersberg over EVERY item both price, count): one number per
+    site, ignoring item class (compare platform_inflation, which is per class)."""
+    import statistics
+    ratios: dict[str, list[float]] = {}
+    for _, _, vals in _item_table(listings).values():
+        ref = vals.get(REFERENCE)
+        if not ref:
+            continue
+        for k, v in vals.items():
+            if k != REFERENCE:
+                ratios.setdefault(k, []).append(v / ref)
+    return {k: (statistics.median(r), len(r)) for k, r in ratios.items()}
+
+
 def item_gaps(listings: list[Listing], *, min_ratio: float = 1.001, min_gap: int = 0,
               adjust_inflation: bool = True) -> list[ItemGap]:
     """Items two or more sites price differently. With `adjust_inflation` each site's value is
     first divided by that site's typical level for the item's class (see platform_inflation), so
     only a gap bigger than the site's usual markup counts."""
     infl = platform_inflation(listings) if adjust_inflation else {}
+    wide = platform_wide_inflation(listings) if adjust_inflation else {}
     gaps = []
     for display, cls, values in _item_table(listings).values():
         if len(values) < 2:
@@ -214,7 +231,11 @@ def item_gaps(listings: list[Listing], *, min_ratio: float = 1.001, min_gap: int
         for k, v in values.items():
             level, n = infl.get(cls, {}).get(k, (1.0, 0))
             adjusted[k] = v / level if (level and n >= MIN_CLASS_ITEMS) else float(v)
-        g = ItemGap(display, values, cls, adjusted)
+        adjusted_platform = {}
+        for k, v in values.items():
+            level, n = wide.get(k, (1.0, 0))
+            adjusted_platform[k] = v / level if (level and n >= MIN_CLASS_ITEMS) else float(v)
+        g = ItemGap(display, values, cls, adjusted, adjusted_platform)
         if g.ratio >= min_ratio and g.gap >= min_gap:
             gaps.append(g)
     gaps.sort(key=lambda g: (-g.gap, -g.ratio))

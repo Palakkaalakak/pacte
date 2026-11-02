@@ -161,32 +161,40 @@ def build_view(
     return view, new_seen
 
 
-def _gap_tables(gaps: list, gap_cols: list[str]) -> dict[str, list[dict]]:
+def _gap_tables(gaps: list, gap_cols: list[str], with_platform: bool = False) -> dict[str, list[dict]]:
     """The value gaps as three separate tables (same item order in each):
       values    - every site's published value, with its ratio to Gamersberg in brackets
-      corrected - the same with each site's usual price level removed (Gamersberg's scale)
+      corrected - the same with each site's usual price level removed, per item class (Gamersberg's scale)
+      platform  - (optional) the same using ONE platform-wide level per site, ignoring class
       summary   - the effective/raw gap amounts and which sites are highest/lowest
     Ratios are measured against Gamersberg (the reference scale); an item Gamersberg doesn't price
     falls back to its lowest-priced site."""
-    values, corrected, summary = [], [], []
+    values, corrected, platform, summary = [], [], [], []
     for g in gaps:
         adj = g.adjusted or {k: float(v) for k, v in g.values.items()}
         ref_nominal = g.values.get(REFERENCE) or min(g.values.values())
         ref_adj = adj.get(REFERENCE) or min(adj.values())
-        v_row, c_row = {"Item": g.name}, {"Item": g.name}
+        v_row, c_row, p_row = {"Item": g.name}, {"Item": g.name}, {"Item": g.name}
+        adj_p = g.adjusted_platform or {k: float(v) for k, v in g.values.items()}
+        ref_p = adj_p.get(REFERENCE) or min(adj_p.values())
         for k in gap_cols:
             label = SITE_VALUE_KEYS[k]
             v_row[label] = f"{format_value(g.values[k])} ({g.values[k] / ref_nominal:.2f}x)" if k in g.values else ""
             c_row[label] = f"{format_value(int(adj[k]))} ({adj[k] / ref_adj:.2f}x)" if k in g.values else ""
+            p_row[label] = f"{format_value(int(adj_p[k]))} ({adj_p[k] / ref_p:.2f}x)" if k in g.values else ""
         values.append(v_row)
         corrected.append(c_row)
+        platform.append(p_row)
         summary.append({
             "Item": g.name,
             "Effective gap": f"{format_value(g.gap)} ({g.ratio:.2f}x)",
             "Raw gap": f"{format_value(g.raw_gap)} ({g.raw_ratio:.2f}x)",
             "Higher on": g.higher_on, "Lower on": g.lower_on, "Class": g.cls,
         })
-    return {"values": values, "corrected": corrected, "summary": summary}
+    out = {"values": values, "corrected": corrected, "summary": summary}
+    if with_platform:
+        out["platform"] = platform
+    return out
 
 
 def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dict | None) -> dict:
@@ -204,7 +212,7 @@ def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dic
     gap_cols = [k for k in SITE_VALUE_KEYS if any(k in g.values for g in gaps)]  # only sites that appear
     return {
         "ts": time.time(),
-        "gaps": _gap_tables(gaps[:300], gap_cols),
+        "gaps": _gap_tables(gaps[:300], gap_cols, cfg.get("platform_table", False)),
         "trades": [{
             "Item": x.item,
             "Buy: you pay": ", ".join(i.name for i in x.buy.want),

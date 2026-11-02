@@ -141,3 +141,22 @@ def test_corrected_table_removes_the_sites_price_level() -> None:
     t = _gap_tables([g], ["gamersberg", "tradehub"])
     assert (t["values"][0]["Gamersberg"], t["values"][0]["Trade Hub"]) == ("100 (1.00x)", "160 (1.60x)")      # as published
     assert (t["corrected"][0]["Gamersberg"], t["corrected"][0]["Trade Hub"]) == ("100 (1.00x)", "145 (1.45x)")  # 160 / 1.10
+
+
+def test_platform_wide_table_pools_all_classes_into_one_level() -> None:
+    from blox_trade_finder.core.arbitrage import platform_wide_inflation
+    from blox_trade_finder.live import _gap_tables
+    # tradehub prices Natural fruits +10%, Skins +50%, Odd +100%: the platform-wide level pools every class
+    def mk(n, typ, gb, th, i): return CatalogItem(id=i, name=n, type=typ, values={"gamersberg": gb, "tradehub": th})
+    items = [mk("A", "Natural", 100, 110, 1), mk("B", "Natural", 200, 220, 2), mk("C", "Natural", 300, 330, 3),
+             mk("S1", "Skins", 100, 150, 4), mk("S2", "Skins", 200, 300, 5), mk("S3", "Skins", 300, 450, 6),
+             mk("Odd", "Natural", 100, 200, 7)]
+    ls = [_l(f"l{i}", [it], [items[(i + 1) % len(items)]]) for i, it in enumerate(items)]
+    level, n = platform_wide_inflation(ls)["tradehub"]
+    assert n == 7 and round(level, 2) == 1.50                       # median over all items, any class
+    g = next(g for g in item_gaps(ls, min_ratio=1.001) if g.name == "Odd")
+    t = _gap_tables([g], ["gamersberg", "tradehub"], with_platform=True)
+    assert t["values"][0]["Trade Hub"] == "200 (2.00x)"
+    assert t["corrected"][0]["Trade Hub"] == "181 (1.82x)"          # Natural fruits run +10% -> 200 / 1.10
+    assert t["platform"][0]["Trade Hub"] == "133 (1.33x)"           # one pooled +50% level -> 200 / 1.50
+    assert "platform" not in _gap_tables([g], ["gamersberg", "tradehub"])

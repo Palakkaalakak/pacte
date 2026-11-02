@@ -1045,7 +1045,7 @@ def _arb_cfg() -> dict:
         value_basis=ss.get("arb_basis", "gamersberg"), min_pct=ss.get("arb_pct", 10) / 100,
         cross_site_only=ss.get("arb_cross", True), max_age_minutes=ss.get("arb_age", 10) or None,
         min_ratio=ss.get("arb_ratio", 1.001), only_mine=ss.get("arb_mine", True),
-        judge_by_norm=ss.get("arb_norm", False),
+        judge_by_norm=ss.get("arb_norm", False), platform_table=ss.get("arb_platform", False),
     )
 
 
@@ -1357,6 +1357,12 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
              "'min profit %' is measured against the usual spread of the two sites involved "
              "(real profit is still required).",
     )
+    st.checkbox(
+        "Also show a 4th table corrected by each site's platform-wide inflation (all item classes pooled)",
+        value=False, key="arb_platform",
+        help="The 'Corrected' table adjusts per item class (e.g. limiteds vs permanents). This one uses a "
+             "single average level per site, measured against Gamersberg.",
+    )
     arb_mine = st.checkbox("Only trades I can make with my inventory", value=True, key="arb_mine")
     st.checkbox("🔁 Also search arbitrage on every live scan (runs alongside the live checker)", value=False, key="arb_auto")
     if st.button("⚖️ Find Arbitrage", use_container_width=True, key="arb_btn"):
@@ -1417,9 +1423,12 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
                        "with that site's usual price level for this kind of item removed; **Summary** = the gap.")
             st.markdown("**1 · Published values**")
             st.dataframe(pd.DataFrame(_g["values"]), use_container_width=True, hide_index=True)
-            st.markdown("**2 · Corrected values**")
+            st.markdown("**2 · Corrected values** (per item class)")
             st.dataframe(pd.DataFrame(_g["corrected"]), use_container_width=True, hide_index=True)
-            st.markdown("**3 · Gap summary**")
+            if "platform" in _g:
+                st.markdown("**3 · Corrected by platform-wide inflation** (one average level per site, all classes pooled)")
+                st.dataframe(pd.DataFrame(_g["platform"]), use_container_width=True, hide_index=True)
+            st.markdown(f"**{4 if 'platform' in _g else 3} · Gap summary**")
             st.dataframe(pd.DataFrame(_g["summary"]), use_container_width=True, hide_index=True)
         else:
             st.info("No items with a big enough value gap in the data scanned.")
