@@ -805,7 +805,8 @@ with st.expander("💰 Account value"):
         from blox_trade_finder.core.arbitrage import value_maps
         from blox_trade_finder.core.valuation import value_inventory
         # Site prices come from the last scan (the live checker's or a manual one).
-        _scan_cache = (worker.snapshot()["listings"] if worker is not None else None) or st.session_state.get("last_listings")
+        _aw = st.session_state.get("live_worker")  # the worker object is created further down the page
+        _scan_cache = (_aw.snapshot()["listings"] if _aw is not None else None) or st.session_state.get("last_listings")
         _site_maps = {k: m for k, m in value_maps(_scan_cache[1]).items() if m} if _scan_cache else {}
         _av_options = ["gamersberg", "fruityblox", "bloxfruit", *[k for k in _site_maps if k != "gamersberg"], "average"]
         _av_basis = st.selectbox(
