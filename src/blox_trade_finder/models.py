@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 ValueBasis = Literal[
     "gamersberg", "fruityblox", "bloxfruit", "bloxfruitsvalues",
-    "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg",
+    "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg", "bloxvalues",
 ]
 
 

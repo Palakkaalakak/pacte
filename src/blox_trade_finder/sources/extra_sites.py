@@ -78,7 +78,8 @@ def _with_value(item: CatalogItem, site: str, value: int) -> CatalogItem:
 def _parse_time(value) -> datetime:
     if isinstance(value, (int, float)):
         return datetime.fromtimestamp(value, tz=timezone.utc)
-    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)  # naive timestamps are UTC
 
 
 def _listing(site: str, ad_id, base_url: str, poster: str, give, want, created) -> Listing | None:
@@ -251,16 +252,18 @@ class TradeHub(_Site):
 
 # ------------------------------------------------------------------ TradeBloxFruit
 class TradeBloxFruit(_Site):
+    """Also the base for every site running the same 'bloxcalc' trade-ad backend."""
     id, label, poll_seconds = "tradebloxfruit", "TradeBloxFruit", 3.0
     page_url = "https://tradebloxfruit.com/trading"
+    api_path = "/api/trade-ads"
 
     def fetch_raw(self, latest: bool = False, max_age_minutes: float | None = None) -> list[dict]:
         out: list[dict] = []
         page = 1
         while page <= (1 if latest else 5):
-            body = self._get("/api/trade-ads", page=page).json()
+            body = self._get(self.api_path, page=page).json()
             ads = body.get("ads", [])
-            out.extend(a for a in ads if a.get("status") == "active")
+            out.extend(a for a in ads if a.get("status", "active") == "active")  # some sites send no status
             if page >= (body.get("total_pages") or 1) or page_is_too_old(ads, "created_at", max_age_minutes):
                 break
             page += 1
@@ -281,6 +284,15 @@ class TradeBloxFruit(_Site):
             if lst:
                 out.append(lst)
         return out
+
+
+class BloxValuesNet(TradeBloxFruit):
+    """bloxvalues.net runs the same trade-ad plugin as TradeBloxFruit behind WordPress REST
+    (`/wp-json/bloxcalc/v1/trade-ads`, 20 per page, newest first). Periphery: one request per poll."""
+    id, label, poll_seconds = "bloxvalues", "BloxValues.net", 5.0
+    page_url = "https://bloxvalues.net/trade-ads/"
+    api_path = "/wp-json/bloxcalc/v1/trade-ads"
+    periphery = True
 
 
 # ------------------------------------------------------------------ bloxfruitsvalues.gg
@@ -385,7 +397,7 @@ class BloxFruitsAI(_Site):
 
 
 EXTRA_SITES: dict[str, type[_Site]] = {
-    s.id: s for s in (FantasyBlox, TradeHub, TradeBloxFruit, BloxFruitsValuesGG, BloxFruitsAI)
+    s.id: s for s in (FantasyBlox, TradeHub, TradeBloxFruit, BloxFruitsValuesGG, BloxFruitsAI, BloxValuesNet)
 }
 PERIPHERY_SITES: tuple[str, ...] = tuple(sid for sid, cls in EXTRA_SITES.items() if getattr(cls, "periphery", False))
 

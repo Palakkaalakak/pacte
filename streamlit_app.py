@@ -445,6 +445,7 @@ VALUE_BASIS_LABELS = {
     "tradehub": "Blox Fruits Trade Hub",
     "tradebloxfruit": "TradeBloxFruit",
     "bfvgg": "BloxFruitsValues.gg",
+    "bloxvalues": "BloxValues.net",
 }
 
 
@@ -1347,7 +1348,7 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
     )
     arb_cross = st.checkbox("Cross-site only (buy on one site, sell on the other)", value=True, key="arb_cross")
     arb_basis = st.selectbox(
-        "Value basis for profit", ["gamersberg", "bloxfruitsvalues", "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg"],
+        "Value basis for profit", ["gamersberg", "bloxfruitsvalues", "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg", "bloxvalues"],
         format_func=lambda k: VALUE_BASIS_LABELS[k], key="arb_basis",
     )
     st.checkbox(

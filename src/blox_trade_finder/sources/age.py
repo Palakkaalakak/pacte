@@ -11,7 +11,8 @@ def to_epoch(value) -> float | None:
             return float(value)
         if isinstance(value, datetime):
             return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).timestamp()
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).timestamp()  # naive = UTC
     except (TypeError, ValueError):
         return None
 

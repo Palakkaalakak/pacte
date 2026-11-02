@@ -24,6 +24,7 @@ GB, BFV = "gamersberg", "bloxfruitsvalues"
 SITE_VALUE_KEYS: dict[str, str] = {
     "gamersberg": "Gamersberg", "bloxfruitsvalues": "bloxfruitsvalues.com", "fantasyblox": "FantasyBlox",
     "tradehub": "Trade Hub", "tradebloxfruit": "TradeBloxFruit", "bfvgg": "BloxFruitsValues.gg",
+    "bloxvalues": "BloxValues.net",
 }
 
 

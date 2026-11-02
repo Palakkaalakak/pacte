@@ -25,13 +25,17 @@ rather than guessed.
 |---|---|
 | **BloxFruitsAI** (bloxfruitsai.com) | Tiny board (about 7 ads) embedded in the `/trading` page; names are lowercase slugs and free text ("Dragon and or Dough"), so only the clean ads resolve (4 of 7 in testing). Enabled with the "Include periphery sites" toggle; not part of the default site set. |
 
+| **BloxValues.net** (bloxvalues.net) | WordPress site running the same trade-ad plugin as TradeBloxFruit, exposed at `/wp-json/bloxcalc/v1/trade-ads` (20/page, newest first, per-item values, no `status` field, naive UTC timestamps). 26 live ads when tested. Opt-in. |
+
 ## Checked, not usable
 
 | Site | Why |
 |---|---|
 | bloxfruits.trade | Trade offers need a login (`/api/offers` answers "missing bearer token"); no open ad feed. |
 | bloxfruittrading.com | A copy of another game's site template (its text talks about fish); no usable feed. |
-| bloxvalues.net, bloxfruittradecalculator.com | Value lists / calculators only, no trade-ad board. |
+| bloxfruittradecalculator.com | Calculator only, no trade-ad board. |
+| TradeKitsune (tradekitsune.com/bloxfruits) | Next.js app; its trade list is not served from any open route I could find. |
+| BloxVaults (bloxvaults.com/trading) | Static page with a post form; no feed endpoint found. |
 
 ## Not integrated
 

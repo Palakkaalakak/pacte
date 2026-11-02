@@ -41,7 +41,7 @@ def override_item(item: CatalogItem, overrides: dict[str, tuple[int, int]]) -> C
     # Replace EVERY source's number, so whichever basis is selected uses the custom value.
     values = {k: value for k in item.values} or {}
     for k in ("gamersberg", "fruityblox", "bloxfruit", "bloxfruitsvalues",
-              "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg"):
+              "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg", "bloxvalues"):
         values[k] = value
     return item.model_copy(update={"values": values, "demand": demand})
 

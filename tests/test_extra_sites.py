@@ -18,7 +18,7 @@ def _site(cls):
 
 
 def test_four_sites_registered() -> None:
-    assert set(EXTRA_SITES) == {"fantasyblox", "tradehub", "tradebloxfruit", "bfvgg", "bloxfruitsai"}
+    assert set(EXTRA_SITES) == {"fantasyblox", "tradehub", "tradebloxfruit", "bfvgg", "bloxfruitsai", "bloxvalues"}
 
 
 def test_aliases_and_permanent_resolution() -> None:
@@ -112,7 +112,7 @@ def test_fantasyblox_links_open_the_posters_profile() -> None:
 def test_periphery_bloxfruitsai_only_resolves_clean_ads() -> None:
     from blox_trade_finder.scan import DEFAULT_SOURCES, VALID_SOURCES
     from blox_trade_finder.sources.extra_sites import BloxFruitsAI, PERIPHERY_SITES
-    assert PERIPHERY_SITES == ("bloxfruitsai",) and "bloxfruitsai" in VALID_SOURCES and "bloxfruitsai" not in DEFAULT_SOURCES
+    assert set(PERIPHERY_SITES) == {"bloxfruitsai", "bloxvalues"} and "bloxvalues" in VALID_SOURCES and not set(PERIPHERY_SITES) & set(DEFAULT_SOURCES)
     raw = [
         {"id": "a", "status": "open", "created_at": "2026-11-01T20:28:40+00:00", "display_name": "T", "offering": ["venom"], "wanting": "Pain"},
         {"id": "b", "status": "open", "created_at": "2026-11-01T20:28:40+00:00", "display_name": "T", "offering": ["venom"], "wanting": "Dragon and or Dough"},
@@ -121,3 +121,13 @@ def test_periphery_bloxfruitsai_only_resolves_clean_ads() -> None:
     out = _site(BloxFruitsAI).build(raw, _cat())
     assert [l.id for l in out] == ["bloxfruitsai:a", "bloxfruitsai:c"]
     assert out[1].give[0].name == "Permanent Venom"
+
+
+def test_bloxvalues_net_uses_wordpress_route_and_utc_naive_times() -> None:
+    from blox_trade_finder.sources.extra_sites import BloxValuesNet
+    assert BloxValuesNet.api_path == "/wp-json/bloxcalc/v1/trade-ads" and BloxValuesNet.periphery
+    raw = [{"id": 5, "username": "u", "created_at": "2026-11-02 07:35:31",   # no status field, naive time
+            "offering": [{"name": "Venom", "mode": "regular", "qty": 1, "value": 25}],
+            "requesting": [{"name": "Pain", "mode": "regular", "qty": 1, "value": 10}]}]
+    out = _site(BloxValuesNet).build(raw, _cat())
+    assert out[0].created_at.tzinfo is not None and out[0].created_at.hour == 7 and out[0].source == "bloxvalues"
