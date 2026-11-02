@@ -22,13 +22,15 @@ from blox_trade_finder.core.normalize import (
 from blox_trade_finder.core.overrides import apply_overrides
 from blox_trade_finder.models import Goals, Inventory, Match
 from blox_trade_finder.sources.bloxfruitsvalues import BloxFruitsValuesSource
+from blox_trade_finder.sources.extra_sites import EXTRA_SITES
 from blox_trade_finder.sources.gamersberg import GamersbergSource
 from blox_trade_finder.store import TradeStore
 
 logger = logging.getLogger(__name__)
 
 BFV_STORE_MAX = 3000
-VALID_SOURCES = ("gamersberg", "bloxfruitsvalues")
+DEFAULT_SOURCES = ("gamersberg", "bloxfruitsvalues")  # extra sites are opt-in
+VALID_SOURCES = (*DEFAULT_SOURCES, *EXTRA_SITES)
 
 # Hard ceiling on how long we wait for either source's fetch thread. Every
 # individual HTTP request already has its own timeout + bounded retries, but a
@@ -78,10 +80,11 @@ def run_scan(
     bfv_store: dict | None = None,
     catalog_fresh: bool | None = None,
     bfv_latest: int | None = None,
+    extra_latest: bool = False,
 ) -> ScanResult:
     """Fetch, normalize and match. `sources` defaults to all of VALID_SOURCES."""
     if sources is None:
-        sources = list(VALID_SOURCES)
+        sources = list(DEFAULT_SOURCES)
     unknown = [s for s in sources if s not in VALID_SOURCES]
     if unknown:
         raise ValueError(f"Unknown source(s): {unknown}. Valid: {list(VALID_SOURCES)}")
@@ -90,6 +93,7 @@ def run_scan(
 
     gamersberg = GamersbergSource(request_interval)
     bfv = BloxFruitsValuesSource(request_interval, bfv_workers)
+    extras = {sid: EXTRA_SITES[sid](max(request_interval, 0.25)) for sid in sources if sid in EXTRA_SITES}
     try:
         item_names = [entry.name for entry in inventory.items]
 
@@ -130,10 +134,11 @@ def run_scan(
         # NOT a `with` block: exiting the context manager joins worker threads,
         # so a stuck fetch would hang there even after our timeout fired.
         # shutdown(wait=False) lets us abandon a wedged thread instead.
-        executor = ThreadPoolExecutor(max_workers=2)
+        executor = ThreadPoolExecutor(max_workers=2 + len(extras))
         try:
             f_gb = executor.submit(_fetch_gb)
             f_bfv = executor.submit(_fetch_bfv)
+            f_extra = {sid: executor.submit(site.fetch_raw, extra_latest) for sid, site in extras.items()}
 
             _phase(progress, "catalog")
             # Catalog always comes from Gamersberg regardless of trade sources —
@@ -169,6 +174,14 @@ def run_scan(
 
         _phase(progress, "matching")
         listings = build_listings(gamersberg_raw, catalog) + build_listings_bfv(bfv_raw, catalog)
+        for sid, site in extras.items():
+            # An extra site being down must never break the scan of the others.
+            try:
+                site_listings = site.build(f_extra[sid].result(timeout=SOURCE_FETCH_TIMEOUT_SECONDS), catalog)
+                logger.info("%s: %d usable listings", sid, len(site_listings))
+                listings += site_listings
+            except Exception as exc:
+                logger.warning("%s failed: %s: %s", sid, type(exc).__name__, exc)
         listings = apply_overrides(listings, custom_values)  # user-forced values replace the sites'
         inv_counts = inventory_counts(inventory)
         matches = find_matches(listings, inv_counts, goals)
@@ -187,3 +200,5 @@ def run_scan(
     finally:
         gamersberg.close()
         bfv.close()
+        for site in extras.values():
+            site.close()

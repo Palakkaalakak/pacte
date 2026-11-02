@@ -959,19 +959,16 @@ scam_cfg = {
 
 # ------------------------------------------------------------------ sources
 st.header(t("header_sources"))
-SOURCE_CHOICES = {
-    t("sources_both"): ["gamersberg", "bloxfruitsvalues"],
-    t("sources_gb_only"): ["gamersberg"],
-    t("sources_bfv_only"): ["bloxfruitsvalues"],
+from blox_trade_finder.sources.extra_sites import EXTRA_SITES
+
+SITE_LABELS = {
+    "gamersberg": "Gamersberg", "bloxfruitsvalues": "bloxfruitsvalues.com",
+    **{sid: cls.label for sid, cls in EXTRA_SITES.items()},
 }
-source_label = st.radio(
-    "Sources",
-    list(SOURCE_CHOICES.keys()),
-    horizontal=True,
-    label_visibility="collapsed",
-    help=t("sources_help"),
-)
-selected_sources = SOURCE_CHOICES[source_label]
+selected_sources = st.multiselect(
+    "Sites to scan", list(SITE_LABELS), default=["gamersberg", "bloxfruitsvalues"],
+    format_func=lambda sid: SITE_LABELS[sid], help=t("sources_help"), key="sources_pick",
+) or ["gamersberg", "bloxfruitsvalues"]
 
 # ------------------------------------------------------------------- action
 find_clicked = st.button(t("find_trades"), type="primary", use_container_width=True)
@@ -1283,12 +1280,12 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
             from blox_trade_finder.core.normalize import inventory_counts as _inv_counts
             try:
                 cached = (worker.snapshot()["listings"] if worker is not None else None) or st.session_state.get("last_listings")
-                if cached and time.time() - cached[0] < LIVE_SCAN_INTERVAL_SECONDS and set(selected_sources) == {"gamersberg", "bloxfruitsvalues"}:
+                if cached and time.time() - cached[0] < LIVE_SCAN_INTERVAL_SECONDS and set(selected_sources) >= {"gamersberg", "bloxfruitsvalues"}:
                     _alist = cached[1]
                 else:
                     with st.spinner(t("progress_start")):
                         _ares = run_scan(
-                            inventory, Goals(any=True), sources=["gamersberg", "bloxfruitsvalues"],
+                            inventory, Goals(any=True), sources=sorted(set(selected_sources) | {"gamersberg", "bloxfruitsvalues"}),
                             deep=True, gb_max_pages=INTERACTIVE_GB_MAX_PAGES, custom_values=custom_values,
                         )
                     _alist = _ares.listings

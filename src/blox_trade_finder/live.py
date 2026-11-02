@@ -18,6 +18,7 @@ from blox_trade_finder.core.chains import find_chains
 from blox_trade_finder.core.normalize import inventory_counts
 from blox_trade_finder.models import Goals, Inventory, Match
 from blox_trade_finder.scan import run_scan
+from blox_trade_finder.sources.extra_sites import EXTRA_SITES
 from blox_trade_finder.ui.table import format_value
 
 logger = logging.getLogger(__name__)
@@ -218,6 +219,7 @@ class LiveWorker:
         self._fail_streak: dict[tuple, int] = {}
         self._gb_full_done = False
         self._bfv_thread: threading.Thread | None = None
+        self._extra_threads: dict[str, threading.Thread] = {}
         self._last_seen_by_ui = time.time()
         self.state: dict = {
             "view": None, "chains": None, "chains_ts": 0.0, "scans": 0, "alarm_seq": 0,
@@ -276,6 +278,7 @@ class LiveWorker:
                 request_interval=FAST_REQUEST_INTERVAL, bfv_workers=FAST_BFV_WORKERS,
                 bfv_max_pages=None if full else 1, bfv_store=self._bfv_store,
                 bfv_latest=None if full else BFV_LATEST_PAGE_SIZE,
+                extra_latest=not needs_book,
             )
             if use_gb:
                 self._gb_full_done = True
@@ -373,14 +376,32 @@ class LiveWorker:
         for t in helpers:
             t.join(timeout=1)
 
+    def _extra_loop(self, site_id: str) -> None:
+        """Constant mode: one independent loop per extra site, paced by that site's own
+        poll gap (a multi-MB feed like Trade Hub shouldn't be hit every second)."""
+        gap = max(EXTRA_SITES[site_id].poll_seconds, MIN_LOOP_SECONDS)
+        while not self._stop.is_set() and self.interval == 0 and site_id in self.sources:
+            if self._idle_expired():
+                return
+            self._scan_once([site_id])
+            self._stop.wait(gap)
+
     def _loop(self) -> None:
         while not self._stop.is_set():
-            constant = self.interval == 0 and set(self.sources) >= {"gamersberg", "bloxfruitsvalues"}
+            constant = self.interval == 0
             if constant:
-                if self._bfv_thread is None or not self._bfv_thread.is_alive():
+                # Gamersberg runs on this thread; every other site gets its own loop(s).
+                if "bloxfruitsvalues" in self.sources and (self._bfv_thread is None or not self._bfv_thread.is_alive()):
                     self._bfv_thread = threading.Thread(target=self._bfv_loop, daemon=True, name="live-bfv")
                     self._bfv_thread.start()
-                self._scan_once(["gamersberg"])
+                for sid in self.sources:
+                    t = self._extra_threads.get(sid)
+                    if sid in EXTRA_SITES and (t is None or not t.is_alive()):
+                        t = threading.Thread(target=self._extra_loop, args=(sid,), daemon=True, name=f"live-{sid}")
+                        self._extra_threads[sid] = t
+                        t.start()
+                if "gamersberg" in self.sources:
+                    self._scan_once(["gamersberg"])
             else:
                 self._scan_once()
             started = time.time()

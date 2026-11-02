@@ -21,7 +21,7 @@ from blox_trade_finder.cache import CACHE_DIR
 from blox_trade_finder.emailer import EmailConfig, matches_to_html, matches_to_text, send_email
 from blox_trade_finder.models import Goals, Inventory, Match
 from blox_trade_finder.rules import AlertRule, route_matches
-from blox_trade_finder.scan import VALID_SOURCES, run_scan
+from blox_trade_finder.scan import DEFAULT_SOURCES, VALID_SOURCES, run_scan
 from blox_trade_finder.store import TradeStore
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ class WatcherConfig(BaseModel):
     # Full alert rules: each has its own conditions AND its own delivery
     # frequency (see blox_trade_finder.rules.AlertRule).
     rules: list[AlertRule] = Field(default_factory=list)
-    sources: list[str] = Field(default_factory=lambda: list(VALID_SOURCES))
+    sources: list[str] = Field(default_factory=lambda: list(DEFAULT_SOURCES))
     send_empty_digest: bool = False
     max_matches_per_email: int = 40
     email: EmailConfig | None = None
