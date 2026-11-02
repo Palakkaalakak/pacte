@@ -42,6 +42,7 @@ from blox_trade_finder.models import Goals, Inventory, InventoryEntry
 from blox_trade_finder.live import build_arb_view, NOTIFY_MAX_AGE_MINUTES, LiveWorker, DEFAULT_BLOCKED_ITEMS, build_view, filter_chains, filter_listings
 from blox_trade_finder.core.overrides import CUSTOM_VALUES, DEFAULT_OVERRIDDEN, build_overrides
 from blox_trade_finder.scan import ScanProgress, run_scan
+from blox_trade_finder.sources.extra_sites import EXTRA_SITES, PERIPHERY_SITES
 from blox_trade_finder.sources.gamersberg import GamersbergSource
 from blox_trade_finder.ui.table import format_value
 
@@ -676,7 +677,7 @@ if st.session_state.get("_code_fp") != _code_fingerprint():
             _old_worker.stop()
     except Exception:
         pass
-    for _k in ("live_worker", "last_view", "last_listings", "chain_view", "chain_view_ts",
+    for _k in ("live_worker", "last_view", "last_listings", "value_listings", "chain_view", "chain_view_ts",
                "arb_view3", "seen_listing_ids", "alarm_html", "alarm_until", "alarm_seq_played"):
         st.session_state.pop(_k, None)
     st.session_state["_code_fp"] = _code_fingerprint()
@@ -806,8 +807,29 @@ with st.expander("💰 Account value"):
         from blox_trade_finder.core.arbitrage import platform_inflation, platform_wide_inflation, value_maps
         from blox_trade_finder.core.valuation import HIGHEST_ADJUSTED, HIGHEST_ADJUSTED_PLATFORM, value_inventory
         # Site prices come from the last scan (the live checker's or a manual one).
+        if st.button("🔄 Scan site prices for this (quick, prices only)", key="av_scan", use_container_width=True):
+            try:
+                # The site picker is further down the page, so read its saved choice from session state.
+                _vmain = ["gamersberg", "bloxfruitsvalues", *[x for x in EXTRA_SITES if x not in PERIPHERY_SITES]]
+                _vsources = list(st.session_state.get("sources_pick") or _vmain)
+                if st.session_state.get("use_periphery"):
+                    _vsources += list(PERIPHERY_SITES)
+                with st.spinner("Fetching each site's newest ads to read their prices..."):
+                    _vres = run_scan(
+                        inventory, Goals(any=True), sources=_vsources, deep=True, gb_max_pages=15,
+                        request_interval=0.25, extra_latest=True, bfv_latest=100, custom_values=None,
+                    )
+                # Kept apart from trade scans: shallow in time, so chains/arbitrage must not reuse it.
+                st.session_state["value_listings"] = (time.time(), _vres.listings, 1.0)
+            except Exception as exc:
+                st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
         _aw = st.session_state.get("live_worker")  # the worker object is created further down the page
-        _scan_cache = (_aw.snapshot()["listings"] if _aw is not None else None) or st.session_state.get("last_listings")
+        # Prices come from the newest scan of any kind (this button, the live checker, or Find Trades).
+        _candidates = [c for c in (
+            _aw.snapshot()["listings"] if _aw is not None else None,
+            st.session_state.get("last_listings"), st.session_state.get("value_listings"),
+        ) if c]
+        _scan_cache = max(_candidates, key=lambda c: c[0]) if _candidates else None
         _site_maps = {k: m for k, m in value_maps(_scan_cache[1]).items() if m} if _scan_cache else {}
         _av_options = ["gamersberg", "fruityblox", "bloxfruit", *[k for k in _site_maps if k != "gamersberg"], "average"]
         if _scan_cache:   # needs scanned prices from several sites to measure each site's price level
