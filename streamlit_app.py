@@ -1410,9 +1410,17 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
                        "of items compared. 1.10x = that site prices the whole class ~10% higher, so a 10% gap "
                        "there is normal. Value gaps below are adjusted for this.")
             st.dataframe(pd.DataFrame(_arb["inflation"]), use_container_width=True, hide_index=True)
-        st.subheader(f"Value gaps ({len(_arb['gaps'])})")
-        if _arb["gaps"]:
-            st.dataframe(pd.DataFrame(_arb["gaps"]), use_container_width=True, hide_index=True)
+        _g = _arb["gaps"]
+        st.subheader(f"Value gaps ({len(_g['summary'])})")
+        if _g["summary"]:
+            st.caption("Ratios are against Gamersberg. **Published** = each site's own number; **Corrected** = "
+                       "with that site's usual price level for this kind of item removed; **Summary** = the gap.")
+            st.markdown("**1 · Published values**")
+            st.dataframe(pd.DataFrame(_g["values"]), use_container_width=True, hide_index=True)
+            st.markdown("**2 · Corrected values**")
+            st.dataframe(pd.DataFrame(_g["corrected"]), use_container_width=True, hide_index=True)
+            st.markdown("**3 · Gap summary**")
+            st.dataframe(pd.DataFrame(_g["summary"]), use_container_width=True, hide_index=True)
         else:
             st.info("No items with a big enough value gap in the data scanned.")
 

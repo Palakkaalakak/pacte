@@ -112,29 +112,32 @@ def test_gap_amounts_carry_effective_and_raw_values() -> None:
     assert g.gap == int(160 / 1.10 - 100) and round(g.ratio, 2) == 1.45      # 45 effective vs 60 raw
 
 
-def test_gap_rows_show_nominal_then_corrected_values_with_ratios() -> None:
+def _gap_cfg():
+    return dict(value_basis="gamersberg", min_pct=0.1, cross_site_only=True, max_age_minutes=None,
+                min_ratio=1.001, only_mine=False)
+
+
+def test_value_gaps_are_three_tables_with_ratios_against_gamersberg() -> None:
     from blox_trade_finder.live import build_arb_view
     a = CatalogItem(id=1, name="Venom", values={"gamersberg": 60_000_000, "tradehub": 25_000_000, "fantasyblox": 100_000_000})
     v = build_arb_view([_l("x", [CatalogItem(id=2, name="Pain", values={"gamersberg": 10})], [a])],
-                       cfg=dict(value_basis="gamersberg", min_pct=0.1, cross_site_only=True, max_age_minutes=None,
-                                min_ratio=1.001, only_mine=False), inventory_counts=Counter(), scam_cfg=None)
-    row = v["gaps"][0]
-    assert list(row) == ["Item", "Gamersberg", "FantasyBlox", "Trade Hub",
-                         "Gamersberg · corrected", "FantasyBlox · corrected", "Trade Hub · corrected",
-                         "Effective gap", "Raw gap", "Higher on", "Lower on", "Class"]
-    # nominal: value (ratio to the lowest-priced site)
-    assert (row["Gamersberg"], row["FantasyBlox"], row["Trade Hub"]) == ("60.00M (2.40x)", "100.00M (4.00x)", "25.00M (1.00x)")
-    # too few shared items to measure a site price level -> corrected == nominal here
-    assert row["FantasyBlox · corrected"] == "100.00M (4.00x)" and row["Trade Hub · corrected"] == "25.00M (1.00x)"
-    assert row["Effective gap"] == "75.00M (4.00x)"
+                       cfg=_gap_cfg(), inventory_counts=Counter(), scam_cfg=None)
+    t = v["gaps"]
+    assert set(t) == {"values", "corrected", "summary"}
+    assert list(t["values"][0]) == ["Item", "Gamersberg", "FantasyBlox", "Trade Hub"] == list(t["corrected"][0])
+    assert list(t["summary"][0]) == ["Item", "Effective gap", "Raw gap", "Higher on", "Lower on", "Class"]
+    # every ratio is relative to Gamersberg (60M = 1.00x), not to the cheapest site
+    assert (t["values"][0]["Gamersberg"], t["values"][0]["FantasyBlox"], t["values"][0]["Trade Hub"]) == \
+        ("60.00M (1.00x)", "100.00M (1.67x)", "25.00M (0.42x)")
+    assert t["summary"][0]["Effective gap"] == "75.00M (4.00x)"
 
 
-def test_corrected_column_removes_the_sites_price_level() -> None:
-    from blox_trade_finder.live import _gap_row
+def test_corrected_table_removes_the_sites_price_level() -> None:
+    from blox_trade_finder.live import _gap_tables
     mk = lambda n, gb, th, i: CatalogItem(id=i, name=n, type="Natural", values={"gamersberg": gb, "tradehub": th})
     items = [mk("A", 100, 110, 1), mk("B", 200, 220, 2), mk("C", 300, 330, 3), mk("D", 400, 440, 4), mk("Odd", 100, 160, 5)]
     ls = [_l(f"l{i}", [it], [items[(i + 1) % 5]]) for i, it in enumerate(items)]
     g = next(g for g in item_gaps(ls, min_ratio=1.25) if g.name == "Odd")
-    row = _gap_row(g, ["gamersberg", "tradehub"])
-    assert row["Gamersberg"] == "100 (1.00x)" and row["Trade Hub"] == "160 (1.60x)"                 # as published
-    assert row["Gamersberg · corrected"] == "100 (1.00x)" and row["Trade Hub · corrected"] == "145 (1.45x)"  # 160 / 1.10
+    t = _gap_tables([g], ["gamersberg", "tradehub"])
+    assert (t["values"][0]["Gamersberg"], t["values"][0]["Trade Hub"]) == ("100 (1.00x)", "160 (1.60x)")      # as published
+    assert (t["corrected"][0]["Gamersberg"], t["corrected"][0]["Trade Hub"]) == ("100 (1.00x)", "145 (1.45x)")  # 160 / 1.10

@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from typing import Callable
 
-from blox_trade_finder.core.arbitrage import SITE_VALUE_KEYS, find_item_arbitrage, item_gaps, platform_inflation, site_norms
+from blox_trade_finder.core.arbitrage import REFERENCE, SITE_VALUE_KEYS, find_item_arbitrage, item_gaps, platform_inflation, site_norms
 from blox_trade_finder.core.chains import find_chains
 from blox_trade_finder.core.normalize import inventory_counts
 from blox_trade_finder.models import Goals, Inventory, Match
@@ -161,31 +161,32 @@ def build_view(
     return view, new_seen
 
 
-def _gap_row(g, gap_cols: list[str]) -> dict:
-    """One value-gap row, left to right:
-      1. Item
-      2. one column per site: its published (nominal) value and, in brackets, its ratio to the
-         lowest-priced site, e.g. `8.86B (1.17x)`
-      3. the same per site with the CORRECTED value (site price level removed, expressed on
-         Gamersberg's scale) and its ratio to the lowest corrected value, e.g. `7.57B (1.00x)`
-      4. the totals and the rest (Effective gap, Raw gap, Higher on, Lower on, Class)."""
-    adj = g.adjusted or {k: float(v) for k, v in g.values.items()}
-    low_nominal, low_adj = min(g.values.values()), min(adj.values())
-    row = {"Item": g.name}
-    for k in gap_cols:
-        row[SITE_VALUE_KEYS[k]] = (
-            f"{format_value(g.values[k])} ({g.values[k] / low_nominal:.2f}x)" if k in g.values else ""
-        )
-    for k in gap_cols:
-        row[f"{SITE_VALUE_KEYS[k]} · corrected"] = (
-            f"{format_value(int(adj[k]))} ({adj[k] / low_adj:.2f}x)" if k in g.values else ""
-        )
-    row.update({
-        "Effective gap": f"{format_value(g.gap)} ({g.ratio:.2f}x)",
-        "Raw gap": f"{format_value(g.raw_gap)} ({g.raw_ratio:.2f}x)",
-        "Higher on": g.higher_on, "Lower on": g.lower_on, "Class": g.cls,
-    })
-    return row
+def _gap_tables(gaps: list, gap_cols: list[str]) -> dict[str, list[dict]]:
+    """The value gaps as three separate tables (same item order in each):
+      values    - every site's published value, with its ratio to Gamersberg in brackets
+      corrected - the same with each site's usual price level removed (Gamersberg's scale)
+      summary   - the effective/raw gap amounts and which sites are highest/lowest
+    Ratios are measured against Gamersberg (the reference scale); an item Gamersberg doesn't price
+    falls back to its lowest-priced site."""
+    values, corrected, summary = [], [], []
+    for g in gaps:
+        adj = g.adjusted or {k: float(v) for k, v in g.values.items()}
+        ref_nominal = g.values.get(REFERENCE) or min(g.values.values())
+        ref_adj = adj.get(REFERENCE) or min(adj.values())
+        v_row, c_row = {"Item": g.name}, {"Item": g.name}
+        for k in gap_cols:
+            label = SITE_VALUE_KEYS[k]
+            v_row[label] = f"{format_value(g.values[k])} ({g.values[k] / ref_nominal:.2f}x)" if k in g.values else ""
+            c_row[label] = f"{format_value(int(adj[k]))} ({adj[k] / ref_adj:.2f}x)" if k in g.values else ""
+        values.append(v_row)
+        corrected.append(c_row)
+        summary.append({
+            "Item": g.name,
+            "Effective gap": f"{format_value(g.gap)} ({g.ratio:.2f}x)",
+            "Raw gap": f"{format_value(g.raw_gap)} ({g.raw_ratio:.2f}x)",
+            "Higher on": g.higher_on, "Lower on": g.lower_on, "Class": g.cls,
+        })
+    return {"values": values, "corrected": corrected, "summary": summary}
 
 
 def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dict | None) -> dict:
@@ -203,7 +204,7 @@ def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dic
     gap_cols = [k for k in SITE_VALUE_KEYS if any(k in g.values for g in gaps)]  # only sites that appear
     return {
         "ts": time.time(),
-        "gaps": [_gap_row(g, gap_cols) for g in gaps[:300]],
+        "gaps": _gap_tables(gaps[:300], gap_cols),
         "trades": [{
             "Item": x.item,
             "Buy: you pay": ", ".join(i.name for i in x.buy.want),
