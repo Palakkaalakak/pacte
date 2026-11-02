@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from blox_trade_finder.models import Listing, ValueBasis
 
 MAX_CHAINS = 500
+EDGE_KEEP = 3  # interchangeable listings kept per item-for-item swap
 MAX_EXPANSIONS = 200_000  # safety cap on search work when steps are unlimited
 
 
@@ -64,58 +65,69 @@ def find_chains(
     now = now or datetime.now(timezone.utc)
     targets = {n.lower() for n in (target_names or set())}
 
-    by_want: dict[str, list[Listing]] = defaultdict(list)
-    ages: dict[str, float] = {}
+    # Edge table: wanted item -> {given item -> [freshest listings]}. A chain's profit depends
+    # only on the ITEMS it passes through, so listings that make the same swap are
+    # interchangeable: keep the freshest EDGE_KEEP of each swap instead of branching on
+    # hundreds of duplicates (the main cost on a multi-site book).
+    groups: dict[str, dict[tuple[str, int], list[tuple[float, Listing]]]] = defaultdict(lambda: defaultdict(list))
+    display: dict[str, str] = {}
+    start_value: dict[str, int] = {}
     for lst in listings:
         if len(lst.want) != 1 or len(lst.give) != 1:
             continue
         age = _age_minutes(lst, now)
         if age > max_age_minutes:
             continue
-        ages[lst.id + lst.source] = age
-        by_want[lst.want[0].name.lower()].append(lst)
+        w, g = lst.want[0], lst.give[0]
+        wk, gk = w.name.lower(), g.name.lower()
+        display.setdefault(wk, w.name)
+        display.setdefault(gk, g.name)
+        start_value.setdefault(wk, w.value(value_basis))
+        # the end value is per listing (the same item can be priced differently by source)
+        groups[wk][(gk, g.value(value_basis))].append((age, lst))
+    # edges[want] = [(next item, value of it, freshest EDGE_KEEP listings)]
+    edges: dict[str, list[tuple[str, int, list[tuple[float, Listing]]]]] = {}
+    for wk, by_give in groups.items():
+        out = []
+        for (gk, val), lst_list in by_give.items():
+            lst_list.sort(key=lambda x: x[0])
+            out.append((gk, val, lst_list[:EDGE_KEEP]))
+        edges[wk] = out
 
     results: list[Chain] = []
     expansions = [0]
 
-    def value(l: Listing, side: str) -> int:
-        item = (l.give if side == "give" else l.want)[0]
-        return item.value(value_basis)
-
-    def dfs(start_name: str, start_value: int, path: list[Listing], items: list[str]) -> None:
-        expansions[0] += 1
+    def dfs(start: str, start_value: int, path: list[tuple[float, Listing]], items: list[str], seen: set[str]) -> None:
         if len(results) >= MAX_CHAINS or expansions[0] > MAX_EXPANSIONS:
             return
-        current = items[-1]
-        for lst in by_want.get(current.lower(), []):
-            if any(lst is p for p in path):
-                continue
-            nxt = lst.give[0].name
-            closes = nxt.lower() == start_name.lower()
-            if not closes and nxt.lower() in {i.lower() for i in items}:
+        expansions[0] += 1
+        for nxt, end_value, lst_list in edges.get(items[-1], ()):
+            closes = nxt == start
+            if not closes and nxt in seen:
                 continue  # don't wander through an item twice
-            new_path = path + [lst]
-            new_items = items + [nxt]
-            end_value = lst.give[0].value(value_basis)
             profit = end_value - start_value
-            keep = (profit >= min_profit if min_profit > 0 else profit > 0) or nxt.lower() in targets
-            if keep and not (closes and profit <= 0 and nxt.lower() not in targets):
-                results.append(Chain(
-                    steps=new_path,
-                    items=new_items,
-                    start_value=start_value,
-                    end_value=end_value,
-                    oldest_minutes=max(ages[s.id + s.source] for s in new_path),
-                    is_cycle=closes,
-                ))
-            if (max_steps is None or len(new_path) < max_steps) and not closes:
-                dfs(start_name, start_value, new_path, new_items)
+            keep = (profit >= min_profit if min_profit > 0 else profit > 0) or nxt in targets
+            if closes and profit <= 0 and nxt not in targets:
+                keep = False
+            for age, lst in lst_list:
+                if any(lst is p for _, p in path):
+                    continue
+                new_path = path + [(age, lst)]
+                if keep:
+                    results.append(Chain(
+                        steps=[l for _, l in new_path], items=[display[i] for i in items + [nxt]],
+                        start_value=start_value, end_value=end_value,
+                        oldest_minutes=max(a for a, _ in new_path), is_cycle=closes,
+                    ))
+                    if len(results) >= MAX_CHAINS:
+                        return
+                if (max_steps is None or len(new_path) < max_steps) and not closes:
+                    dfs(start, start_value, new_path, items + [nxt], seen | {nxt})
 
     for name, qty in inventory_counts.items():
-        if qty <= 0 or name not in by_want:
+        if qty <= 0 or name not in edges:
             continue
-        sample = by_want[name][0].want[0]
-        dfs(sample.name, sample.value(value_basis), [], [sample.name])
+        dfs(name, start_value[name], [], [name], {name})
 
     results.sort(key=lambda c: (-c.profit, len(c.steps), c.oldest_minutes))
     return results

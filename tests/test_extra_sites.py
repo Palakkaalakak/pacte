@@ -70,3 +70,34 @@ def test_bfvgg_extracts_ads_from_escaped_page_payload() -> None:
     assert _extract_json_array(page, "ads") == ads
     out = _site(BloxFruitsValuesGG).build(ads, _cat())
     assert out[0].give[0].name == "Permanent Venom" and out[0].poster_name == "p"
+
+
+def test_page_is_too_old_and_fantasyblox_stops_paging() -> None:
+    from datetime import timedelta
+    from blox_trade_finder.sources.age import page_is_too_old
+    now = datetime.now(timezone.utc)
+    iso = lambda m: (now - timedelta(minutes=m)).isoformat()
+    assert page_is_too_old([{"t": iso(90)}, {"t": iso(70)}], "t", 60)
+    assert not page_is_too_old([{"t": iso(90)}, {"t": iso(10)}], "t", 60)      # one young ad keeps the page
+    assert not page_is_too_old([{"t": iso(90)}], "t", None)                    # no limit -> never stop
+    assert not page_is_too_old([{"nope": 1}], "t", 60)                        # unreadable time -> keep going
+
+    pages = [
+        {"trades": [{"id": "1", "kind": "normal", "created_at": iso(5)}], "hasMore": True, "nextOffset": 15},
+        {"trades": [{"id": "2", "kind": "normal", "created_at": iso(200)}], "hasMore": True, "nextOffset": 30},
+        {"trades": [{"id": "3", "kind": "normal", "created_at": iso(300)}], "hasMore": True, "nextOffset": 45},
+    ]
+    calls = []
+
+    class Resp:
+        def __init__(self, body): self._b = body
+        def json(self): return self._b
+
+    site = _site(FantasyBlox)
+    site._get = lambda path, offset=0: (calls.append(offset), Resp(pages[offset // 15]))[1]
+    out = site.fetch_raw(max_age_minutes=60)
+    assert calls == [0, 15] and [t["id"] for t in out] == ["1", "2"]            # page 3 (all older) never requested
+
+
+def test_fantasyblox_links_point_at_the_real_trade_page() -> None:
+    assert FantasyBlox.page_url == "https://fantasyblox.com/games/blox-fruits/trade"

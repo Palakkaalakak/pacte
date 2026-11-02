@@ -1019,6 +1019,18 @@ def _arb_cfg() -> dict:
     )
 
 
+def _live_scan_age() -> float | None:
+    """How far back the live scanner must page: the oldest listing any active consumer
+    (results table, chains, arbitrage) still wants. Any consumer with no limit => no cut-off."""
+    ss = st.session_state
+    limits = [ss.get("max_age_min") or None]
+    if ss.get("chain_auto"):
+        limits.append(ss.get("chain_max_age", 5))
+    if ss.get("arb_auto"):
+        limits.append(ss.get("arb_age", 10) or None)
+    return None if any(l is None for l in limits) else max(limits)
+
+
 worker: LiveWorker | None = st.session_state.get("live_worker")
 if live_mode and inventory.items:
     if worker is None or not worker.alive:
@@ -1029,7 +1041,7 @@ if live_mode and inventory.items:
             chain_cfg=_chain_cfg() if st.session_state.get("chain_auto") else None,
             arb_cfg=_arb_cfg() if st.session_state.get("arb_auto") else None,
             interval_seconds=live_interval, gb_max_pages=INTERACTIVE_GB_MAX_PAGES,
-            custom_values=custom_values,
+            custom_values=custom_values, scan_age_minutes=_live_scan_age(),
         )
         worker.start()
         st.session_state["live_worker"] = worker
@@ -1039,6 +1051,7 @@ if live_mode and inventory.items:
         worker.notify_cfg, worker.scam_cfg = notify_cfg, scam_cfg
         worker.interval = live_interval
         worker.custom_values = custom_values
+        worker.scan_age_minutes = _live_scan_age()
         worker.max_age_minutes = st.session_state.get("max_age_min") or None
         worker.notify_age_minutes = _notify_age or None
         worker.chain_cfg = _chain_cfg() if st.session_state.get("chain_auto") else None
@@ -1061,6 +1074,33 @@ def _run_chains(listings: list) -> None:
         find_chains(filter_listings(listings, scam_cfg), inventory_counts(inventory), **_chain_cfg()), scam_cfg
     )
     st.session_state["chain_view_ts"] = time.time()
+
+
+def _reusable_listings(needed_age: float | None, require_sites: set[str] | None = None):
+    """Listings from a recent scan (the live checker's or a manual one) if they were fetched deep
+    enough back in time for `needed_age` minutes (None = needs everything) and from the needed sites."""
+    for cached in ((worker.snapshot()["listings"] if worker is not None else None),
+                   st.session_state.get("last_listings")):
+        if not cached or time.time() - cached[0] >= LIVE_SCAN_INTERVAL_SECONDS:
+            continue
+        cover = cached[2] if len(cached) > 2 else None
+        if cover is not None and (needed_age is None or cover < needed_age):
+            continue
+        if require_sites and not require_sites <= set(selected_sources):
+            continue
+        return cached[1]
+    return None
+
+
+def _manual_scan_age() -> float | None:
+    """Page only as far back as the filters can use: the strictest of the goal's own
+    max listing age and the 'hide older than' box (nothing set => full depth)."""
+    limits = []
+    if not goals.any and goals.max_age_hours:
+        limits.append(goals.max_age_hours * 60)
+    if st.session_state.get("max_age_min"):
+        limits.append(st.session_state["max_age_min"])
+    return min(limits) if limits else None
 
 
 if find_clicked:
@@ -1111,6 +1151,7 @@ if find_clicked:
             sources=selected_sources,
             deep=True,
             gb_max_pages=INTERACTIVE_GB_MAX_PAGES, custom_values=custom_values,
+            max_age_minutes=_manual_scan_age(),
             progress=ScanProgress(
                 on_phase=_on_phase,
                 on_bfv_item_done=_on_bfv_item,
@@ -1127,7 +1168,7 @@ if find_clicked:
     if result is not None:
         progress.progress(100, text=t("progress_done"))
         progress.empty()
-        st.session_state["last_listings"] = (time.time(), result.listings)
+        st.session_state["last_listings"] = (time.time(), result.listings, _manual_scan_age())
         view, st.session_state["seen_listing_ids"] = build_view(
             result, notify_cfg, max_age_minutes=st.session_state.get("max_age_min") or None,
             only_new=False, seen=st.session_state.get("seen_listing_ids"), scam_cfg=scam_cfg,
@@ -1216,16 +1257,17 @@ with st.expander(t("chain_header"), expanded=False):
             st.warning(t("need_item_warning"))
         else:
             try:
-                cached = (worker.snapshot()["listings"] if worker is not None else None) or st.session_state.get("last_listings")
-                if cached and time.time() - cached[0] < LIVE_SCAN_INTERVAL_SECONDS:
-                    _run_chains(cached[1])  # reuse the live checker's fresh fetch
+                cached = _reusable_listings(chain_max_age)
+                if cached is not None:
+                    _run_chains(cached)  # reuse a recent fetch that already reaches back far enough
                 else:
                     with st.spinner(t("progress_start")):
                         _cres = run_scan(
                             inventory, Goals(any=True), sources=selected_sources, deep=True,
                             gb_max_pages=INTERACTIVE_GB_MAX_PAGES, custom_values=custom_values,
+                            max_age_minutes=chain_max_age,
                         )
-                    st.session_state["last_listings"] = (time.time(), _cres.listings)
+                    st.session_state["last_listings"] = (time.time(), _cres.listings, chain_max_age)
                     _run_chains(_cres.listings)
             except Exception as exc:
                 st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
@@ -1281,14 +1323,15 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
         else:
             from blox_trade_finder.core.normalize import inventory_counts as _inv_counts
             try:
-                cached = (worker.snapshot()["listings"] if worker is not None else None) or st.session_state.get("last_listings")
-                if cached and time.time() - cached[0] < LIVE_SCAN_INTERVAL_SECONDS and set(selected_sources) >= {"gamersberg", "bloxfruitsvalues"}:
-                    _alist = cached[1]
+                cached = _reusable_listings(arb_age or None, {"gamersberg", "bloxfruitsvalues"})
+                if cached is not None:
+                    _alist = cached
                 else:
                     with st.spinner(t("progress_start")):
                         _ares = run_scan(
                             inventory, Goals(any=True), sources=sorted(set(selected_sources) | {"gamersberg", "bloxfruitsvalues"}),
                             deep=True, gb_max_pages=INTERACTIVE_GB_MAX_PAGES, custom_values=custom_values,
+                            max_age_minutes=arb_age or None,
                         )
                     _alist = _ares.listings
                 st.session_state["arb_view3"] = build_arb_view(

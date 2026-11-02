@@ -11,6 +11,7 @@ bloxfruitsvalues price seen so Gamersberg-sourced listings can be re-valued too.
 """
 from __future__ import annotations
 
+import heapq
 from collections import Counter
 from datetime import datetime, timezone
 from dataclasses import dataclass
@@ -133,40 +134,52 @@ def find_item_arbitrage(
             return sum(_bfv_value(i, bfv_map) for i in items)
         return sum(i.values.get(value_basis, 0) for i in items)
 
-    buys: dict[str, list[Listing]] = {}
-    sells: dict[str, list[Listing]] = {}
+    # One pass over the book: value each listing ONCE, bucket buys/sells per item.
+    buys: dict[str, list[tuple[int, Listing]]] = {}
+    sells: dict[str, list[tuple[int, Listing]]] = {}
     for lst in listings:
         if not lst.give or not lst.want:
             continue
         if len(lst.give) == 1:
-            buys.setdefault(lst.give[0].name.lower(), []).append(lst)
+            if inventory_counts is not None:
+                need = Counter(i.name.lower() for i in lst.want)
+                if any(inventory_counts.get(n, 0) < q for n, q in need.items()):
+                    continue
+            cost = val(lst.want)
+            if cost > 0:
+                buys.setdefault(lst.give[0].name.lower(), []).append((cost, lst))
         if len(lst.want) == 1:
-            sells.setdefault(lst.want[0].name.lower(), []).append(lst)
+            rev = val(lst.give)
+            if rev > 0:
+                sells.setdefault(lst.want[0].name.lower(), []).append((rev, lst))
 
     out: list[ItemArb] = []
     for key, buy_list in buys.items():
-        for sell in sells.get(key, []):
-            revenue = val(sell.give)
-            if revenue <= 0:
-                continue
-            for buy in buy_list:
+        sell_list = sells.get(key)
+        if not sell_list:
+            continue
+        buy_list.sort(key=lambda x: x[0])                   # cheapest buy first
+        sell_list.sort(key=lambda x: x[0], reverse=True)    # richest sell first
+        best_rev = sell_list[0][0]
+        top: list[tuple[float, int, ItemArb]] = []          # min-heap of the best `per_item` pairs
+        for cost, buy in buy_list:
+            if best_rev <= cost or (best_rev - cost) / cost < min_pct:
+                break                                       # costs only rise from here: no pair can qualify
+            if len(top) >= per_item and (best_rev - cost) / cost <= top[0][0]:
+                break                                       # can't beat what we already hold
+            for rev, sell in sell_list:
+                if rev <= cost or (rev - cost) / cost < min_pct:
+                    break                                   # sells only fall from here
                 if buy is sell or (cross_site_only and buy.source == sell.source):
                     continue
-                if inventory_counts is not None:
-                    need = Counter(i.name.lower() for i in buy.want)
-                    if any(inventory_counts.get(n, 0) < q for n, q in need.items()):
-                        continue
-                cost = val(buy.want)
-                if cost <= 0:
-                    continue
-                arb = ItemArb(buy.give[0].name, buy, sell, cost, revenue)
-                if arb.profit > 0 and arb.profit_pct >= min_pct:
-                    out.append(arb)
+                pct = (rev - cost) / cost
+                if len(top) >= per_item and pct <= top[0][0]:
+                    break
+                arb = ItemArb(buy.give[0].name, buy, sell, cost, rev)
+                if len(top) < per_item:
+                    heapq.heappush(top, (pct, id(arb), arb))
+                else:
+                    heapq.heapreplace(top, (pct, id(arb), arb))
+        out.extend(a for _, _, a in top)
     out.sort(key=lambda a: -a.profit_pct)
-    counts: Counter[str] = Counter()
-    capped = []
-    for a in out:  # keep the best few per item so one popular item doesn't flood the table
-        if counts[a.item] < per_item:
-            counts[a.item] += 1
-            capped.append(a)
-    return capped
+    return out

@@ -19,11 +19,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from datetime import datetime, timezone
 
 import httpx
 
 from blox_trade_finder.http_client import RateLimiter, USER_AGENT, request_with_retry
+from blox_trade_finder.sources.age import page_is_too_old, to_epoch
 from blox_trade_finder.models import Catalog, CatalogItem, Listing
 
 logger = logging.getLogger(__name__)
@@ -104,7 +106,7 @@ class _Site:
         resp.raise_for_status()
         return resp
 
-    def fetch_raw(self, latest: bool = False) -> list[dict]:  # pragma: no cover - overridden
+    def fetch_raw(self, latest: bool = False, max_age_minutes: float | None = None) -> list[dict]:  # pragma: no cover
         raise NotImplementedError
 
     def build(self, raw: list[dict], catalog: Catalog) -> list[Listing]:  # pragma: no cover
@@ -114,17 +116,18 @@ class _Site:
 # ------------------------------------------------------------------ FantasyBlox
 class FantasyBlox(_Site):
     id, label, poll_seconds = "fantasyblox", "FantasyBlox", 1.0
-    page_url = "https://fantasyblox.com/trading"
+    page_url = "https://fantasyblox.com/games/blox-fruits/trade"  # no per-ad page exists; ?ad= only keeps links unique
     PAGE = 15
     MAX_PAGES = 20  # full pass = newest 300 ads
 
-    def fetch_raw(self, latest: bool = False) -> list[dict]:
+    def fetch_raw(self, latest: bool = False, max_age_minutes: float | None = None) -> list[dict]:
         out: list[dict] = []
         offset = 0
         for _ in range(1 if latest else self.MAX_PAGES):
             body = self._get("/api/trades", offset=offset).json()
-            out.extend(t for t in body.get("trades", []) if t.get("kind") == "normal")
-            if not body.get("hasMore"):
+            trades = body.get("trades", [])
+            out.extend(t for t in trades if t.get("kind") == "normal")
+            if not body.get("hasMore") or page_is_too_old(trades, "created_at", max_age_minutes):
                 break
             offset = body.get("nextOffset", offset + self.PAGE)
         return out
@@ -150,9 +153,19 @@ class TradeHub(_Site):
     id, label, poll_seconds = "tradehub", "Blox Fruits Trade Hub", 15.0  # one big (multi-MB) response
     page_url = "https://bloxfruitstradehub.com/trading"
 
-    def fetch_raw(self, latest: bool = False) -> list[dict]:
-        # The endpoint ignores paging params and returns every active ad, newest first.
+    def fetch_raw(self, latest: bool = False, max_age_minutes: float | None = None) -> list[dict]:
+        # The endpoint ignores paging params and returns every active ad, newest first; trim the
+        # tail we don't need before any further processing.
         data = self._get("/api/trades").json()
+        if max_age_minutes:
+            cutoff = time.time() - max_age_minutes * 60
+            keep = len(data)
+            for i, ad in enumerate(data):
+                ts = to_epoch(ad.get("createdAt"))
+                if ts is not None and ts < cutoff:
+                    keep = i
+                    break
+            data = data[:keep]
         return data[:300] if latest else data
 
     def build(self, raw, catalog):
@@ -182,13 +195,14 @@ class TradeBloxFruit(_Site):
     id, label, poll_seconds = "tradebloxfruit", "TradeBloxFruit", 3.0
     page_url = "https://tradebloxfruit.com/trading"
 
-    def fetch_raw(self, latest: bool = False) -> list[dict]:
+    def fetch_raw(self, latest: bool = False, max_age_minutes: float | None = None) -> list[dict]:
         out: list[dict] = []
         page = 1
         while page <= (1 if latest else 5):
             body = self._get("/api/trade-ads", page=page).json()
-            out.extend(a for a in body.get("ads", []) if a.get("status") == "active")
-            if page >= (body.get("total_pages") or 1):
+            ads = body.get("ads", [])
+            out.extend(a for a in ads if a.get("status") == "active")
+            if page >= (body.get("total_pages") or 1) or page_is_too_old(ads, "created_at", max_age_minutes):
                 break
             page += 1
         return out
@@ -241,8 +255,8 @@ class BloxFruitsValuesGG(_Site):
     id, label, poll_seconds = "bfvgg", "BloxFruitsValues.gg", 3.0
     page_url = "https://bloxfruitsvalues.gg/trades"
 
-    def fetch_raw(self, latest: bool = False) -> list[dict]:
-        # Server-rendered page that embeds the newest ~60 ads.
+    def fetch_raw(self, latest: bool = False, max_age_minutes: float | None = None) -> list[dict]:
+        # Server-rendered page that embeds the newest ~60 ads (a single page: nothing to cut short).
         return _extract_json_array(self._get("/trades").text, "ads")
 
     def build(self, raw, catalog):

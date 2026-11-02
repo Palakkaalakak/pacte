@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from blox_trade_finder.cache import get_or_fetch, peek
+from blox_trade_finder.sources.age import page_is_too_old
 from blox_trade_finder.http_client import RateLimiter, make_client, request_with_retry
 from blox_trade_finder.models import Catalog, CatalogItem
 from blox_trade_finder.sources.base import TradeSource, ValueSource
@@ -155,6 +156,7 @@ class GamersbergSource(ValueSource, TradeSource):
         store: TradeStore | None = None,
         on_page_done: Callable[[int, int], None] | None = None,
         max_pages: int | None = None,
+        max_age_minutes: float | None = None,
     ) -> list[dict]:
         # We always fetch the full feed rather than filtering per item (unlike
         # bloxfruitsvalues.com); item_names is accepted for interface
@@ -165,7 +167,7 @@ class GamersbergSource(ValueSource, TradeSource):
             # default-path store — real bug caught by tests.
             if store is None:
                 store = TradeStore()
-            return self._fetch_deep(store, on_page_done=on_page_done, max_pages=max_pages)
+            return self._fetch_deep(store, on_page_done=on_page_done, max_pages=max_pages, max_age_minutes=max_age_minutes)
         return get_or_fetch(
             "gamersberg_trades", self.ttl_seconds_trades, self._fetch_all_trade_pages, fresh=fresh
         )
@@ -176,6 +178,7 @@ class GamersbergSource(ValueSource, TradeSource):
         *,
         on_page_done: Callable[[int, int], None] | None = None,
         max_pages: int | None = None,
+        max_age_minutes: float | None = None,
     ) -> list[dict]:
         """Incremental deep scan: page the (newest-first) feed, stop after
         KNOWN_PAGE_STREAK_TO_STOP consecutive pages of already-stored trades,
@@ -215,6 +218,8 @@ class GamersbergSource(ValueSource, TradeSource):
 
             if not batch or unseen_this_fetch == 0:
                 break  # true end of feed (or the API started repeating itself)
+            if page_is_too_old(batch, "createdAt", max_age_minutes):
+                break  # newest-first feed: nothing further down can be young enough
             if unknown_to_store == 0:
                 known_page_streak += 1
                 if known_page_streak >= KNOWN_PAGE_STREAK_TO_STOP:

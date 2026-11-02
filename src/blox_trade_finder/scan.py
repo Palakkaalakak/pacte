@@ -81,6 +81,7 @@ def run_scan(
     catalog_fresh: bool | None = None,
     bfv_latest: int | None = None,
     extra_latest: bool = False,
+    max_age_minutes: float | None = None,
 ) -> ScanResult:
     """Fetch, normalize and match. `sources` defaults to all of VALID_SOURCES."""
     if sources is None:
@@ -108,6 +109,7 @@ def run_scan(
                     store=gb_store,
                     on_page_done=progress.on_gb_page_done if progress else None,
                     max_pages=gb_max_pages,
+                    max_age_minutes=max_age_minutes,
                 )
             return gamersberg.fetch_listings_raw(fresh=fresh)
 
@@ -125,7 +127,7 @@ def run_scan(
                     progress.on_bfv_item_done(name, _count[0], len(item_names))
 
             return bfv.fetch_listings_raw(
-                item_names=item_names, fresh=fresh, on_item_done=_on_item_done, max_pages=bfv_max_pages,
+                item_names=item_names, fresh=fresh, on_item_done=_on_item_done, max_pages=bfv_max_pages, max_age_minutes=max_age_minutes,
             )
 
         # The two hosts are unrelated (each source has its own rate limiter),
@@ -138,7 +140,7 @@ def run_scan(
         try:
             f_gb = executor.submit(_fetch_gb)
             f_bfv = executor.submit(_fetch_bfv)
-            f_extra = {sid: executor.submit(site.fetch_raw, extra_latest) for sid, site in extras.items()}
+            f_extra = {sid: executor.submit(site.fetch_raw, extra_latest, max_age_minutes) for sid, site in extras.items()}
 
             _phase(progress, "catalog")
             # Catalog always comes from Gamersberg regardless of trade sources —

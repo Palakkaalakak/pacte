@@ -29,6 +29,7 @@ FAST_BFV_WORKERS = 6
 BFV_LATEST_PAGE_SIZE = 25  # newest ads fetched per poll of bloxfruitsvalues' global feed
 FAIL_STREAK_TO_REPORT = 6  # consecutive failed polls of one source before showing an error
 BFV_POLLERS = 3  # overlapping pollers: one slow response never stalls polling
+CA_MIN_GAP = 3.0  # min seconds between chain/arbitrage recomputes
 FEED_MAX = 200  # newest offers kept on screen in live mode
 MIN_LOOP_SECONDS = 0.5  # floor between scan starts, even in constant mode
 FULL_REFRESH_EVERY = 10  # full bloxfruitsvalues refetch every N scans
@@ -190,6 +191,7 @@ class LiveWorker:
         chain_cfg: dict | None,
         arb_cfg: dict | None = None,
         custom_values: dict | None = None,
+        scan_age_minutes: float | None = None,
         interval_seconds: int = 300,
         gb_max_pages: int | None = None,
         idle_timeout_seconds: int = 900,
@@ -200,6 +202,7 @@ class LiveWorker:
         self.scam_cfg = scam_cfg
         self.arb_cfg = arb_cfg
         self.custom_values = custom_values
+        self.scan_age_minutes = scan_age_minutes  # how far back paging must go (None = everything)
         self.notify_age_minutes = notify_age_minutes
         self.interval, self.gb_max_pages = interval_seconds, gb_max_pages
         self.idle_timeout, self._scan_fn = idle_timeout_seconds, scan_fn
@@ -213,6 +216,8 @@ class LiveWorker:
         self._feed_urls: set[str] = set()
         self._last_full = 0
         self._proc_lock = threading.Lock()
+        self._ca_lock = threading.Lock()
+        self._ca_last = 0.0
         self._baselined: set[str] = set()
         self._src_listings: dict[str, list] = {}
         self._errors: dict[tuple, str] = {}
@@ -278,7 +283,7 @@ class LiveWorker:
                 request_interval=FAST_REQUEST_INTERVAL, bfv_workers=FAST_BFV_WORKERS,
                 bfv_max_pages=None if full else 1, bfv_store=self._bfv_store,
                 bfv_latest=None if full else BFV_LATEST_PAGE_SIZE,
-                extra_latest=not needs_book,
+                extra_latest=not needs_book, max_age_minutes=self.scan_age_minutes,
             )
             if use_gb:
                 self._gb_full_done = True
@@ -309,13 +314,22 @@ class LiveWorker:
                     self._src_listings[src] = [l for l in result.listings if l.source == src]
                 book = [l for ls in self._src_listings.values() for l in ls]
             chains = None
-            if self.chain_cfg is not None:
+            arb = None
+            # Chains/arbitrage run over the whole merged book. In constant mode six loops finish
+            # scans many times a second, so recompute at most every CA_MIN_GAP seconds (the book
+            # barely changes in between) instead of once per scan.
+            with self._ca_lock:
+                run_ca = (self.chain_cfg is not None or self.arb_cfg is not None) and (
+                    time.time() - self._ca_last >= CA_MIN_GAP
+                )
+                if run_ca:
+                    self._ca_last = time.time()
+            if run_ca and self.chain_cfg is not None:
                 chains = filter_chains(
                     find_chains(filter_listings(book, self.scam_cfg), inventory_counts(self.inventory), **self.chain_cfg),
                     self.scam_cfg,
                 )
-            arb = None
-            if self.arb_cfg is not None:
+            if run_ca and self.arb_cfg is not None:
                 arb = build_arb_view(
                     book, cfg=self.arb_cfg, inventory_counts=inventory_counts(self.inventory),
                     scam_cfg=self.scam_cfg,
@@ -327,7 +341,7 @@ class LiveWorker:
                 self._fail_streak[tuple(sources)] = 0
                 self.state.update(
                     view=view, scans=self.state["scans"] + 1, last_scan_ts=time.time(),
-                    error="; ".join(self._errors.values()) or None, listings=(time.time(), book),
+                    error="; ".join(self._errors.values()) or None, listings=(time.time(), book, self.scan_age_minutes),
                     site_counts={k: len(v) for k, v in self._src_listings.items()},
                 )
                 if chains is not None:

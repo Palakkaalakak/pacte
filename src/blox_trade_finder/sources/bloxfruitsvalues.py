@@ -10,6 +10,7 @@ import httpx
 
 from blox_trade_finder.cache import get_or_fetch
 from blox_trade_finder.http_client import RateLimiter, make_client, request_with_retry
+from blox_trade_finder.sources.age import page_is_too_old
 from blox_trade_finder.sources.base import TradeSource
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class BloxFruitsValuesSource(TradeSource):
         fresh: bool = False,
         on_item_done: Callable[[str], None] | None = None,
         max_pages: int | None = None,
+        max_age_minutes: float | None = None,
     ) -> list[dict]:
         """`on_item_done(name)` is called once per item after it's been queried
         (whether it succeeded or was skipped) — lets the CLI show real
@@ -76,11 +78,11 @@ class BloxFruitsValuesSource(TradeSource):
             try:
                 # Partial (newest-page-only) fetches get their own cache key so they
                 # can never be mistaken for a full multi-page result.
-                suffix = f"_p{max_pages}" if max_pages else ""
+                suffix = (f"_p{max_pages}" if max_pages else "") + (f"_a{int(max_age_minutes)}" if max_age_minutes else "")
                 return get_or_fetch(
                     f"bfv_trades_{_slugify(name)}{suffix}",
                     self.ttl_seconds,
-                    lambda n=name: self._fetch_for_name(n, max_pages) if max_pages else self._fetch_for_name(n),
+                    lambda n=name: self._fetch_for_name(n, max_pages, max_age_minutes) if (max_pages or max_age_minutes) else self._fetch_for_name(n),
                     fresh=fresh,
                 )
             except (httpx.HTTPStatusError, httpx.TransportError) as exc:
@@ -129,7 +131,7 @@ class BloxFruitsValuesSource(TradeSource):
         resp.raise_for_status()
         return resp.json().get("items") or []
 
-    def _fetch_for_name(self, name: str, max_pages: int | None = None) -> list[dict]:
+    def _fetch_for_name(self, name: str, max_pages: int | None = None, max_age_minutes: float | None = None) -> list[dict]:
         results: list[dict] = []
         page = 1
         while page <= (max_pages or MAX_PAGES_PER_ITEM):
@@ -150,6 +152,8 @@ class BloxFruitsValuesSource(TradeSource):
             body = resp.json()
             items = body.get("items") or []
             results.extend(items)
+            if page_is_too_old(items, "created_at", max_age_minutes):
+                break  # newest-first: the rest is older than anything we want
             logger.debug(
                 "bloxfruitsvalues: '%s' page %d -> %d item(s), hasMore=%s, totalCount=%s",
                 name, page, len(items), body.get("hasMore"), body.get("totalCount"),
