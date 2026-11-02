@@ -63,6 +63,10 @@
     {
       "name": "Hellfire Gas",
       "qty": 1
+    },
+    {
+      "name": "Lightning",
+      "qty": 1
     }
   ]
 }
