@@ -158,3 +158,17 @@ def test_constant_mode_gamersberg_never_waits_on_slow_bfv() -> None:
     bfv = [t for s, t in log if s == ("bloxfruitsvalues",)]
     assert len(gb) >= 5 and len(bfv) >= 1           # gamersberg kept polling while bfv was busy
     assert not [1 for s, _ in log if len(s) > 1]     # never a combined scan in constant mode
+
+
+def test_exclude_permanents_with_allow_list() -> None:
+    from blox_trade_finder.live import has_blocked_item
+    from blox_trade_finder.models import CatalogItem, Listing
+    mk = lambda *n: [CatalogItem(id=i, name=x) for i, x in enumerate(n)]
+    base = dict(id="1", source="g", url="u", poster_name="p", poster_rating=1.0, wfl={}, created_at=datetime.now(timezone.utc))
+    cfg = {"exclude_permanent": True, "permanent_allow": ["Dragon"]}
+    assert has_blocked_item(Listing(give=mk("Permanent Venom"), want=mk("Pain"), **base), cfg)
+    assert has_blocked_item(Listing(give=mk("Pain"), want=mk("Permanent Gas"), **base), cfg)          # either side
+    assert not has_blocked_item(Listing(give=mk("Permanent West Dragon"), want=mk("Pain"), **base), cfg)
+    assert not has_blocked_item(Listing(give=mk("Permanent Dragon"), want=mk("Pain"), **base), cfg)
+    assert not has_blocked_item(Listing(give=mk("Venom"), want=mk("Pain"), **base), cfg)
+    assert not has_blocked_item(Listing(give=mk("Permanent Venom"), want=mk("Pain"), **base), {"exclude_permanent": False})

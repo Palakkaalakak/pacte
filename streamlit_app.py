@@ -962,7 +962,17 @@ with st.expander("🛡️ Scam / fake filter"):
         value=", ".join(w.title() for w in DEFAULT_BLOCKED_ITEMS), key="scam_blocked",
         help="Comma-separated item names. Trades with 'Or', 'Upgrade', 'Any'… aren't definite trades.",
     )
+    _sc_noperm = st.checkbox(
+        "Exclude Permanent versions from every scan (table, live, chains, arbitrage)",
+        value=False, key="scam_noperm",
+    )
+    _sc_perm_allow = st.text_input(
+        "...except Permanent versions of (comma-separated)", value="Dragon", key="scam_perm_allow",
+        disabled=not _sc_noperm, help="e.g. Dragon keeps Permanent West/East Dragon.",
+    )
 scam_cfg = {
+    "exclude_permanent": _sc_noperm,
+    "permanent_allow": [w.strip() for w in _sc_perm_allow.split(",") if w.strip()],
     "blocked_items": [w.strip() for w in _sc_blocked.split(",") if w.strip()],
     "max_profit_pct": _sc_pct / 100 if _sc_pct else None,
     "max_profit": _sc_abs * 1_000_000 if _sc_abs else None,

@@ -78,11 +78,26 @@ def is_scam(delta: int, profit_pct: float, cfg: dict | None) -> bool:
 DEFAULT_BLOCKED_ITEMS = ("or", "add", "any", "upgrade", "downgrade")
 
 
+def _is_excluded_permanent(name: str, allow: list[frozenset[str]]) -> bool:
+    lower = name.strip().lower()
+    if not lower.startswith("permanent "):
+        return False
+    base_words = _name_words(lower[len("permanent "):])
+    return not any(a <= base_words for a in allow)
+
+
 def has_blocked_item(listing, cfg: dict | None) -> bool:
-    """True if either side contains a placeholder like "Or"/"Upgrade"/"Any" —
-    those listings aren't a definite, executable trade."""
-    blocked = {b.strip().lower() for b in (cfg or {}).get("blocked_items", []) if b.strip()}
-    return bool(blocked) and any(i.name.strip().lower() in blocked for i in (*listing.give, *listing.want))
+    """True if either side contains a placeholder like "Or"/"Upgrade"/"Any" (not a definite
+    trade), or - when `exclude_permanent` is on - a Permanent item that isn't in the allow list."""
+    cfg = cfg or {}
+    items = (*listing.give, *listing.want)
+    blocked = {b.strip().lower() for b in cfg.get("blocked_items", []) if b.strip()}
+    if blocked and any(i.name.strip().lower() in blocked for i in items):
+        return True
+    if cfg.get("exclude_permanent"):
+        allow = [_name_words(a) for a in cfg.get("permanent_allow", []) if _name_words(a)]
+        return any(_is_excluded_permanent(i.name, allow) for i in items)
+    return False
 
 
 def filter_listings(listings: list, cfg: dict | None) -> list:
