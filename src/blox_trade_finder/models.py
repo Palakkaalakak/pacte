@@ -6,7 +6,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-ValueBasis = Literal["gamersberg", "fruityblox", "bloxfruit", "bloxfruitsvalues"]
+ValueBasis = Literal[
+    "gamersberg", "fruityblox", "bloxfruit", "bloxfruitsvalues",
+    "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg",
+]
 
 
 class Variant(str, Enum):

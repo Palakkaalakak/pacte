@@ -1,44 +1,61 @@
-"""Cross-site arbitrage: Gamersberg vs bloxfruitsvalues.com disagree on values.
+"""Cross-site arbitrage across every supported site.
 
 Arbitrage is about the SAME item:
-  * item_gaps           – items the two sites price differently (ratio + absolute gap).
-  * find_item_arbitrage – buy item X in one listing, sell X in another for more
-                          (priced on one common basis), ideally across the two sites.
+  * item_gaps           – items the sites price differently (Gamersberg, bloxfruitsvalues.com and
+                          every extra site that publishes its own numbers).
+  * find_item_arbitrage – buy item X in one listing, sell the SAME X in another for more
+                          (priced on one common basis), ideally across sites.
 
-Gamersberg items carry only Gamersberg values; bloxfruitsvalues items carry their
-own number (plus Gamersberg's when the name matches). `bfv_value_map` harvests every
-bloxfruitsvalues price seen so Gamersberg-sourced listings can be re-valued too.
+Every listing item carries Gamersberg's catalog value plus, when its site publishes one, that
+site's own number under the site id. `value_maps` harvests each site's prices seen anywhere in the
+book, so a listing from site A can be re-valued with site B's numbers.
 """
 from __future__ import annotations
 
 import heapq
 from collections import Counter
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from blox_trade_finder.models import CatalogItem, Listing
 
 GB, BFV = "gamersberg", "bloxfruitsvalues"
+# Value columns that belong to a scanned site, with display names.
+SITE_VALUE_KEYS: dict[str, str] = {
+    "gamersberg": "Gamersberg", "bloxfruitsvalues": "bloxfruitsvalues.com", "fantasyblox": "FantasyBlox",
+    "tradehub": "Trade Hub", "tradebloxfruit": "TradeBloxFruit", "bfvgg": "BloxFruitsValues.gg",
+}
 
 
 @dataclass
 class ItemGap:
     name: str
-    gb_value: int
-    bfv_value: int
+    values: dict[str, int] = field(default_factory=dict)   # site id -> that site's value (> 0)
+
+    @property
+    def high_key(self) -> str:
+        return max(self.values, key=self.values.get)
+
+    @property
+    def low_key(self) -> str:
+        return min(self.values, key=self.values.get)
 
     @property
     def ratio(self) -> float:
-        lo, hi = sorted((self.gb_value, self.bfv_value))
-        return hi / lo if lo else float("inf")
+        lo = self.values[self.low_key]
+        return self.values[self.high_key] / lo if lo else float("inf")
 
     @property
     def higher_on(self) -> str:
-        return "Gamersberg" if self.gb_value > self.bfv_value else "bloxfruitsvalues"
+        return SITE_VALUE_KEYS.get(self.high_key, self.high_key)
+
+    @property
+    def lower_on(self) -> str:
+        return SITE_VALUE_KEYS.get(self.low_key, self.low_key)
 
     @property
     def gap(self) -> int:
-        return abs(self.gb_value - self.bfv_value)
+        return self.values[self.high_key] - self.values[self.low_key]
 
 
 @dataclass
@@ -71,36 +88,40 @@ class ItemArb:
         return self.buy.source != self.sell.source
 
 
-def bfv_value_map(listings: list[Listing]) -> dict[str, int]:
-    out: dict[str, int] = {}
+def value_maps(listings: list[Listing]) -> dict[str, dict[str, int]]:
+    """site id -> {item name (lower): that site's value}, from every item in the book."""
+    maps: dict[str, dict[str, int]] = {k: {} for k in SITE_VALUE_KEYS}
     for lst in listings:
         for item in (*lst.give, *lst.want):
-            v = item.values.get(BFV, 0)
-            if v > 0:
-                out[item.name.lower()] = v
-    return out
+            name = item.name.lower()
+            for k, v in item.values.items():
+                if k in maps and v > 0:
+                    maps[k][name] = v
+    return maps
 
 
-def _gb_value(item: CatalogItem) -> int:
-    return item.values.get(GB, 0)
+def bfv_value_map(listings: list[Listing]) -> dict[str, int]:
+    return value_maps(listings)[BFV]
 
 
-def _bfv_value(item: CatalogItem, bfv_map: dict[str, int]) -> int:
-    return item.values.get(BFV, 0) or bfv_map.get(item.name.lower(), 0)
+def _value(item: CatalogItem, key: str, maps: dict[str, dict[str, int]]) -> int:
+    return item.values.get(key, 0) or maps.get(key, {}).get(item.name.lower(), 0)
 
 
 def item_gaps(listings: list[Listing], *, min_ratio: float = 1.25, min_gap: int = 0) -> list[ItemGap]:
-    bfv_map = bfv_value_map(listings)
-    seen: dict[str, ItemGap] = {}
+    maps = value_maps(listings)
+    names: dict[str, str] = {}
     for lst in listings:
         for item in (*lst.give, *lst.want):
-            key = item.name.lower()
-            if key in seen:
-                continue
-            gb, bfv = _gb_value(item), _bfv_value(item, bfv_map)
-            if gb > 0 and bfv > 0:
-                seen[key] = ItemGap(item.name, gb, bfv)
-    gaps = [g for g in seen.values() if g.ratio >= min_ratio and g.gap >= min_gap]
+            names.setdefault(item.name.lower(), item.name)
+    gaps = []
+    for lower, display in names.items():
+        values = {k: m[lower] for k, m in maps.items() if lower in m}
+        if len(values) < 2:
+            continue                       # need two sites' opinions to have a gap
+        g = ItemGap(display, values)
+        if g.ratio >= min_ratio and g.gap >= min_gap:
+            gaps.append(g)
     gaps.sort(key=lambda g: (-g.gap, -g.ratio))
     return gaps
 
@@ -121,7 +142,7 @@ def find_item_arbitrage(
     buy listing's `want`, receive the sell listing's `give`; X passes straight through.
     Both legs are valued with ONE common basis so the profit is real, not a valuation
     artifact. `inventory_counts` restricts buys to ones you can pay for."""
-    bfv_map = bfv_value_map(listings)
+    maps = value_maps(listings)
     now = now or datetime.now(timezone.utc)
     if max_age_minutes:  # stale ads are probably filled or the poster is offline
         def _fresh(l: Listing) -> bool:
@@ -130,9 +151,7 @@ def find_item_arbitrage(
         listings = [l for l in listings if _fresh(l)]
 
     def val(items: list[CatalogItem]) -> int:
-        if value_basis == BFV:
-            return sum(_bfv_value(i, bfv_map) for i in items)
-        return sum(i.values.get(value_basis, 0) for i in items)
+        return sum(_value(i, value_basis, maps) for i in items)
 
     # One pass over the book: value each listing ONCE, bucket buys/sells per item.
     buys: dict[str, list[tuple[int, Listing]]] = {}

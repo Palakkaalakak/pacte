@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from typing import Callable
 
-from blox_trade_finder.core.arbitrage import find_item_arbitrage, item_gaps
+from blox_trade_finder.core.arbitrage import SITE_VALUE_KEYS, find_item_arbitrage, item_gaps
 from blox_trade_finder.core.chains import find_chains
 from blox_trade_finder.core.normalize import inventory_counts
 from blox_trade_finder.models import Goals, Inventory, Match
@@ -156,13 +156,16 @@ def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dic
         inventory_counts=inventory_counts if cfg["only_mine"] else None,
     )
     trades = [x for x in trades if not is_scam(x.profit, x.profit_pct, scam_cfg)]
+    gaps = item_gaps(listings, min_ratio=cfg["min_ratio"])
+    gap_cols = [k for k in SITE_VALUE_KEYS if any(k in g.values for g in gaps)]  # only sites that appear
     return {
         "ts": time.time(),
         "gaps": [{
-            "Item": g.name, "Gamersberg": format_value(g.gb_value),
-            "bloxfruitsvalues": format_value(g.bfv_value),
-            "Ratio": f"{g.ratio:.2f}x", "Higher on": g.higher_on, "Gap": format_value(g.gap),
-        } for g in item_gaps(listings, min_ratio=cfg["min_ratio"])[:300]],
+            "Item": g.name,
+            **{SITE_VALUE_KEYS[k]: (format_value(g.values[k]) if k in g.values else "") for k in gap_cols},
+            "Ratio": f"{g.ratio:.2f}x", "Higher on": g.higher_on, "Lower on": g.lower_on,
+            "Gap": format_value(g.gap),
+        } for g in gaps[:300]],
         "trades": [{
             "Item": x.item,
             "Buy: you pay": ", ".join(i.name for i in x.buy.want),

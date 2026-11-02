@@ -53,6 +53,28 @@ def _resolve(name: str, permanent: bool, by_name: dict[str, CatalogItem]) -> Cat
     return by_name.get(name.lower())
 
 
+def parse_money(text) -> int:
+    """'500m' -> 500_000_000, '4.56b' -> 4_560_000_000, 'N/A'/None -> 0."""
+    if isinstance(text, (int, float)):
+        return int(text)
+    raw = str(text or "").strip().lower().replace(",", "")
+    mult = {"k": 1e3, "m": 1e6, "b": 1e9, "t": 1e12}
+    try:
+        if raw and raw[-1] in mult:
+            return int(float(raw[:-1]) * mult[raw[-1]])
+        return int(float(raw))
+    except ValueError:
+        return 0
+
+
+def _with_value(item: CatalogItem, site: str, value: int) -> CatalogItem:
+    """A copy of the catalog item that also carries THIS site's own number under `site`,
+    so the same item can be compared across sites (value gaps, per-site arbitrage)."""
+    if value <= 0:
+        return item
+    return item.model_copy(update={"values": {**item.values, site: int(value)}})
+
+
 def _parse_time(value) -> datetime:
     if isinstance(value, (int, float)):
         return datetime.fromtimestamp(value, tz=timezone.utc)
@@ -71,13 +93,17 @@ def _listing(site: str, ad_id, base_url: str, poster: str, give, want, created) 
     )
 
 
-def _items(entries, by_name, name_of, perm_of, qty_of) -> list[CatalogItem] | None:
-    """Resolve every entry or return None (a trade with an unknown item can't be valued)."""
+def _items(entries, by_name, name_of, perm_of, qty_of, site=None, own_value_of=None) -> list[CatalogItem] | None:
+    """Resolve every entry or return None (a trade with an unknown item can't be valued).
+    `own_value_of(entry, permanent)` supplies the site's own number for the item, if it has one."""
     out: list[CatalogItem] = []
     for e in entries:
-        item = _resolve(name_of(e), perm_of(e), by_name)
+        perm = perm_of(e)
+        item = _resolve(name_of(e), perm, by_name)
         if item is None:
             return None
+        if own_value_of is not None:
+            item = _with_value(item, site, own_value_of(e, perm))
         out.extend([item] * max(1, int(qty_of(e) or 1)))
     return out
 
@@ -114,6 +140,27 @@ class _Site:
 
 
 # ------------------------------------------------------------------ FantasyBlox
+_FB_VALUES: dict = {"at": 0.0, "map": {}}
+
+
+def _fantasyblox_values(site: "FantasyBlox") -> dict[tuple[str, bool], int]:
+    """FantasyBlox's own value list (/api/values), cached for 10 minutes: (name, permanent) -> value."""
+    if time.time() - _FB_VALUES["at"] < 600 and _FB_VALUES["map"]:
+        return _FB_VALUES["map"]
+    try:
+        rows = site._get("/api/values").json().get("overrides", [])
+    except Exception as exc:  # values are a bonus: never break the trade feed over them
+        logger.warning("fantasyblox values unavailable: %s", exc)
+        return _FB_VALUES["map"]
+    m: dict[tuple[str, bool], int] = {}
+    for r in rows:
+        name = (r.get("itemName") or "").strip().lower()
+        m[(name, False)] = parse_money(r.get("value"))
+        m[(name, True)] = parse_money(r.get("permValue"))
+    _FB_VALUES.update(at=time.time(), map=m)
+    return m
+
+
 class FantasyBlox(_Site):
     id, label, poll_seconds = "fantasyblox", "FantasyBlox", 1.0
     page_url = "https://fantasyblox.com/games/blox-fruits/trade"  # no per-ad page exists; ?ad= only keeps links unique
@@ -134,12 +181,16 @@ class FantasyBlox(_Site):
 
     def build(self, raw, catalog):
         by_name = {i.name.lower(): i for i in catalog.items}
+        vals = _fantasyblox_values(self) if raw else {}
+        own = lambda e, perm: vals.get(((e.get("name") or "").strip().lower(), bool(perm)), 0)
         out = []
         for t in raw:
             give = _items(t.get("offering") or [], by_name, lambda e: e.get("name"),
-                          lambda e: e.get("mode") == "permanent", lambda e: e.get("qty") or e.get("quantity"))
+                          lambda e: e.get("mode") == "permanent", lambda e: e.get("qty") or e.get("quantity"),
+                          self.id, own)
             want = _items(t.get("wants") or [], by_name, lambda e: e.get("name"),
-                          lambda e: e.get("mode") == "permanent", lambda e: e.get("qty") or e.get("quantity"))
+                          lambda e: e.get("mode") == "permanent", lambda e: e.get("qty") or e.get("quantity"),
+                          self.id, own)
             if give is None or want is None:
                 continue
             lst = _listing(self.id, t["id"], self.page_url, t.get("username"), give, want, t["created_at"])
@@ -178,7 +229,10 @@ class TradeHub(_Site):
             def side(s):
                 return _items([r for r in rows if r.get("side") == s], by_name,
                               lambda r: (r.get("item") or {}).get("name"),
-                              lambda r: bool(r.get("isPermanent")), lambda r: r.get("quantity"))
+                              lambda r: bool(r.get("isPermanent")), lambda r: r.get("quantity"),
+                              self.id,
+                              # the site quotes values in millions
+                              lambda r, perm: (r.get("item") or {}).get("permanentValue" if perm else "value", 0) * 1_000_000 if (r.get("item") or {}).get("permanentValue" if perm else "value") else 0)
             give, want = side("offering"), side("requesting")
             if give is None or want is None:
                 continue
@@ -211,10 +265,11 @@ class TradeBloxFruit(_Site):
         by_name = {i.name.lower(): i for i in catalog.items}
         out = []
         for a in raw:
+            own = lambda e, perm: e.get("value") or 0
             give = _items(a.get("offering") or [], by_name, lambda e: e.get("name"),
-                          lambda e: e.get("mode") == "permanent", lambda e: e.get("qty"))
+                          lambda e: e.get("mode") == "permanent", lambda e: e.get("qty"), self.id, own)
             want = _items(a.get("requesting") or [], by_name, lambda e: e.get("name"),
-                          lambda e: e.get("mode") == "permanent", lambda e: e.get("qty"))
+                          lambda e: e.get("mode") == "permanent", lambda e: e.get("qty"), self.id, own)
             if give is None or want is None:
                 continue
             lst = _listing(self.id, a["id"], self.page_url, a.get("username"), give, want, a["created_at"])
@@ -269,7 +324,9 @@ class BloxFruitsValuesGG(_Site):
             def side(s):
                 return _items([r for r in rows if r.get("side") == s], by_name,
                               lambda r: (r.get("fruits") or {}).get("name"),
-                              lambda r: bool(r.get("is_permanent")), lambda r: r.get("quantity"))
+                              lambda r: bool(r.get("is_permanent")), lambda r: r.get("quantity"),
+                              self.id,
+                              lambda r, perm: (r.get("fruits") or {}).get("permanent_value" if perm else "physical_value") or 0)
             give, want = side("offering"), side("wanting")
             if give is None or want is None:
                 continue

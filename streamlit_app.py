@@ -441,6 +441,10 @@ VALUE_BASIS_LABELS = {
     "fruityblox": "FruityBlox",
     "bloxfruit": "BloxFruit Values",
     "bloxfruitsvalues": "bloxfruitsvalues.com",
+    "fantasyblox": "FantasyBlox",
+    "tradehub": "Blox Fruits Trade Hub",
+    "tradebloxfruit": "TradeBloxFruit",
+    "bfvgg": "BloxFruitsValues.gg",
 }
 
 
@@ -798,14 +802,20 @@ with st.expander("💰 Account value"):
     if not inventory.items:
         st.info(t("need_item_warning"))
     else:
+        from blox_trade_finder.core.arbitrage import value_maps
         from blox_trade_finder.core.valuation import value_inventory
+        # Site prices come from the last scan (the live checker's or a manual one).
+        _scan_cache = (worker.snapshot()["listings"] if worker is not None else None) or st.session_state.get("last_listings")
+        _site_maps = {k: m for k, m in value_maps(_scan_cache[1]).items() if m} if _scan_cache else {}
+        _av_options = ["gamersberg", "fruityblox", "bloxfruit", *[k for k in _site_maps if k != "gamersberg"], "average"]
         _av_basis = st.selectbox(
-            "Value source", ["gamersberg", "fruityblox", "bloxfruit", "average"],
-            format_func=lambda b: "Average of all sources" if b == "average" else VALUE_BASIS_LABELS[b],
+            "Value source", _av_options,
+            format_func=lambda b: "Average of all sources" if b == "average" else VALUE_BASIS_LABELS.get(b, b),
             key="av_basis",
+            help="Site sources appear after a scan has run (their numbers come from the scanned ads).",
         )
         try:
-            _rows = value_inventory(inventory, _catalog_cached(), _av_basis, custom_values)
+            _rows = value_inventory(inventory, _catalog_cached(), _av_basis, custom_values, _site_maps)
         except Exception as exc:
             _rows = None
             st.error(t("catalog_failed", error=f"{type(exc).__name__}: {exc}"))
@@ -1314,7 +1324,10 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
         help="Older ads are likely already filled or the poster is offline.",
     )
     arb_cross = st.checkbox("Cross-site only (buy on one site, sell on the other)", value=True, key="arb_cross")
-    arb_basis = st.selectbox("Value basis for profit", ["gamersberg", "bloxfruitsvalues"], key="arb_basis")
+    arb_basis = st.selectbox(
+        "Value basis for profit", ["gamersberg", "bloxfruitsvalues", "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg"],
+        format_func=lambda k: VALUE_BASIS_LABELS[k], key="arb_basis",
+    )
     arb_mine = st.checkbox("Only trades I can make with my inventory", value=True, key="arb_mine")
     st.checkbox("🔁 Also search arbitrage on every live scan (runs alongside the live checker)", value=False, key="arb_auto")
     if st.button("⚖️ Find Arbitrage", use_container_width=True, key="arb_btn"):
