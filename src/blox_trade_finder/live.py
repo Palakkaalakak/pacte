@@ -161,6 +161,34 @@ def build_view(
     return view, new_seen
 
 
+def _gap_row(g, gap_cols: list[str]) -> dict:
+    """One value-gap row, left to right:
+      1. Item
+      2. one column per site with its published value
+      3. one column per site with its EFFECTIVE gap and ratio against the lowest-priced site once
+         site price levels are removed, e.g. `+110.00M (1.31x)` (the cheapest site shows `low`)
+      4. the totals and the rest (Effective gap, Raw gap, Higher on, Lower on, Class)."""
+    adj = g.adjusted or {k: float(v) for k, v in g.values.items()}
+    low = min(adj.values())
+    row = {"Item": g.name}
+    for k in gap_cols:
+        row[SITE_VALUE_KEYS[k]] = format_value(g.values[k]) if k in g.values else ""
+    for k in gap_cols:
+        label = f"{SITE_VALUE_KEYS[k]} · eff. gap"
+        if k not in g.values:
+            row[label] = ""
+        elif adj[k] == low:
+            row[label] = "low"
+        else:
+            row[label] = f"+{format_value(int(adj[k] - low))} ({adj[k] / low:.2f}x)"
+    row.update({
+        "Effective gap": f"{format_value(g.gap)} ({g.ratio:.2f}x)",
+        "Raw gap": f"{format_value(g.raw_gap)} ({g.raw_ratio:.2f}x)",
+        "Higher on": g.higher_on, "Lower on": g.lower_on, "Class": g.cls,
+    })
+    return row
+
+
 def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dict | None) -> dict:
     """Arbitrage results as PLAIN rows (dicts/strings only). Plain data can never
     break the page after a redeploy changes a class, unlike stored objects."""
@@ -176,15 +204,7 @@ def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dic
     gap_cols = [k for k in SITE_VALUE_KEYS if any(k in g.values for g in gaps)]  # only sites that appear
     return {
         "ts": time.time(),
-        "gaps": [{
-            "Item": g.name,
-            # amount (ratio): "Effective" removes the sites' usual price level for this kind of item
-            # (the number that is actually an edge); "Raw" is the sites' numbers as published.
-            "Effective gap": f"{format_value(g.gap)} ({g.ratio:.2f}x)",
-            "Raw gap": f"{format_value(g.raw_gap)} ({g.raw_ratio:.2f}x)",
-            "Higher on": g.higher_on, "Lower on": g.lower_on, "Class": g.cls,
-            **{SITE_VALUE_KEYS[k]: (format_value(g.values[k]) if k in g.values else "") for k in gap_cols},
-        } for g in gaps[:300]],
+        "gaps": [_gap_row(g, gap_cols) for g in gaps[:300]],
         "trades": [{
             "Item": x.item,
             "Buy: you pay": ", ".join(i.name for i in x.buy.want),

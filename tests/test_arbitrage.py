@@ -112,12 +112,18 @@ def test_gap_amounts_carry_effective_and_raw_values() -> None:
     assert g.gap == int(160 / 1.10 - 100) and round(g.ratio, 2) == 1.45      # 45 effective vs 60 raw
 
 
-def test_gap_rows_lead_with_the_effective_gap() -> None:
+def test_gap_rows_show_values_then_effective_gap_columns_then_the_rest() -> None:
     from blox_trade_finder.live import build_arb_view
-    a = CatalogItem(id=1, name="Venom", values={"gamersberg": 60, "tradehub": 25, "fantasyblox": 100})
+    a = CatalogItem(id=1, name="Venom", values={"gamersberg": 60_000_000, "tradehub": 25_000_000, "fantasyblox": 100_000_000})
     v = build_arb_view([_l("x", [CatalogItem(id=2, name="Pain", values={"gamersberg": 10})], [a])],
                        cfg=dict(value_basis="gamersberg", min_pct=0.1, cross_site_only=True, max_age_minutes=None,
                                 min_ratio=1.001, only_mine=False), inventory_counts=Counter(), scam_cfg=None)
-    cols = list(v["gaps"][0])
-    assert cols[:3] == ["Item", "Effective gap", "Raw gap"]            # gap amounts right after the item
-    assert cols.index("Higher on") < cols.index("Gamersberg")          # per-site values come last
+    row = v["gaps"][0]
+    cols = list(row)
+    assert cols == ["Item", "Gamersberg", "FantasyBlox", "Trade Hub",
+                    "Gamersberg · eff. gap", "FantasyBlox · eff. gap", "Trade Hub · eff. gap",
+                    "Effective gap", "Raw gap", "Higher on", "Lower on", "Class"]
+    assert (row["Gamersberg"], row["FantasyBlox"], row["Trade Hub"]) == ("60.00M", "100.00M", "25.00M")
+    assert row["Trade Hub · eff. gap"] == "low"
+    assert row["FantasyBlox · eff. gap"] == "+75.00M (4.00x)" and row["Gamersberg · eff. gap"] == "+35.00M (2.40x)"
+    assert row["Effective gap"] == "75.00M (4.00x)"
