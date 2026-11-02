@@ -164,23 +164,22 @@ def build_view(
 def _gap_row(g, gap_cols: list[str]) -> dict:
     """One value-gap row, left to right:
       1. Item
-      2. one column per site with its published value
-      3. one column per site with its EFFECTIVE gap and ratio against the lowest-priced site once
-         site price levels are removed, e.g. `+110.00M (1.31x)` (the cheapest site shows `low`)
+      2. one column per site: its published (nominal) value and, in brackets, its ratio to the
+         lowest-priced site, e.g. `8.86B (1.17x)`
+      3. the same per site with the CORRECTED value (site price level removed, expressed on
+         Gamersberg's scale) and its ratio to the lowest corrected value, e.g. `7.57B (1.00x)`
       4. the totals and the rest (Effective gap, Raw gap, Higher on, Lower on, Class)."""
     adj = g.adjusted or {k: float(v) for k, v in g.values.items()}
-    low = min(adj.values())
+    low_nominal, low_adj = min(g.values.values()), min(adj.values())
     row = {"Item": g.name}
     for k in gap_cols:
-        row[SITE_VALUE_KEYS[k]] = format_value(g.values[k]) if k in g.values else ""
+        row[SITE_VALUE_KEYS[k]] = (
+            f"{format_value(g.values[k])} ({g.values[k] / low_nominal:.2f}x)" if k in g.values else ""
+        )
     for k in gap_cols:
-        label = f"{SITE_VALUE_KEYS[k]} · eff. gap"
-        if k not in g.values:
-            row[label] = ""
-        elif adj[k] == low:
-            row[label] = "low"
-        else:
-            row[label] = f"+{format_value(int(adj[k] - low))} ({adj[k] / low:.2f}x)"
+        row[f"{SITE_VALUE_KEYS[k]} · corrected"] = (
+            f"{format_value(int(adj[k]))} ({adj[k] / low_adj:.2f}x)" if k in g.values else ""
+        )
     row.update({
         "Effective gap": f"{format_value(g.gap)} ({g.ratio:.2f}x)",
         "Raw gap": f"{format_value(g.raw_gap)} ({g.raw_ratio:.2f}x)",

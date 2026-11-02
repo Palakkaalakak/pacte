@@ -112,18 +112,29 @@ def test_gap_amounts_carry_effective_and_raw_values() -> None:
     assert g.gap == int(160 / 1.10 - 100) and round(g.ratio, 2) == 1.45      # 45 effective vs 60 raw
 
 
-def test_gap_rows_show_values_then_effective_gap_columns_then_the_rest() -> None:
+def test_gap_rows_show_nominal_then_corrected_values_with_ratios() -> None:
     from blox_trade_finder.live import build_arb_view
     a = CatalogItem(id=1, name="Venom", values={"gamersberg": 60_000_000, "tradehub": 25_000_000, "fantasyblox": 100_000_000})
     v = build_arb_view([_l("x", [CatalogItem(id=2, name="Pain", values={"gamersberg": 10})], [a])],
                        cfg=dict(value_basis="gamersberg", min_pct=0.1, cross_site_only=True, max_age_minutes=None,
                                 min_ratio=1.001, only_mine=False), inventory_counts=Counter(), scam_cfg=None)
     row = v["gaps"][0]
-    cols = list(row)
-    assert cols == ["Item", "Gamersberg", "FantasyBlox", "Trade Hub",
-                    "Gamersberg · eff. gap", "FantasyBlox · eff. gap", "Trade Hub · eff. gap",
-                    "Effective gap", "Raw gap", "Higher on", "Lower on", "Class"]
-    assert (row["Gamersberg"], row["FantasyBlox"], row["Trade Hub"]) == ("60.00M", "100.00M", "25.00M")
-    assert row["Trade Hub · eff. gap"] == "low"
-    assert row["FantasyBlox · eff. gap"] == "+75.00M (4.00x)" and row["Gamersberg · eff. gap"] == "+35.00M (2.40x)"
+    assert list(row) == ["Item", "Gamersberg", "FantasyBlox", "Trade Hub",
+                         "Gamersberg · corrected", "FantasyBlox · corrected", "Trade Hub · corrected",
+                         "Effective gap", "Raw gap", "Higher on", "Lower on", "Class"]
+    # nominal: value (ratio to the lowest-priced site)
+    assert (row["Gamersberg"], row["FantasyBlox"], row["Trade Hub"]) == ("60.00M (2.40x)", "100.00M (4.00x)", "25.00M (1.00x)")
+    # too few shared items to measure a site price level -> corrected == nominal here
+    assert row["FantasyBlox · corrected"] == "100.00M (4.00x)" and row["Trade Hub · corrected"] == "25.00M (1.00x)"
     assert row["Effective gap"] == "75.00M (4.00x)"
+
+
+def test_corrected_column_removes_the_sites_price_level() -> None:
+    from blox_trade_finder.live import _gap_row
+    mk = lambda n, gb, th, i: CatalogItem(id=i, name=n, type="Natural", values={"gamersberg": gb, "tradehub": th})
+    items = [mk("A", 100, 110, 1), mk("B", 200, 220, 2), mk("C", 300, 330, 3), mk("D", 400, 440, 4), mk("Odd", 100, 160, 5)]
+    ls = [_l(f"l{i}", [it], [items[(i + 1) % 5]]) for i, it in enumerate(items)]
+    g = next(g for g in item_gaps(ls, min_ratio=1.25) if g.name == "Odd")
+    row = _gap_row(g, ["gamersberg", "tradehub"])
+    assert row["Gamersberg"] == "100 (1.00x)" and row["Trade Hub"] == "160 (1.60x)"                 # as published
+    assert row["Gamersberg · corrected"] == "100 (1.00x)" and row["Trade Hub · corrected"] == "145 (1.45x)"  # 160 / 1.10
