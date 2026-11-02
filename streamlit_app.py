@@ -1275,30 +1275,44 @@ def _render_view(view: dict) -> None:
 
 
 def _live_panel() -> None:
-    """Polls the background checker; the latest of {manual, live} view is shown."""
+    """Polls the background checker; the latest of {manual, live} view is shown.
+
+    Layout is three FIXED slots (status, alarm, results). A fragment that polls every few seconds
+    must not change how many elements it emits (an alarm iframe or an error banner coming and
+    going shifts everything after it, and the browser can then drop or duplicate parts such as the
+    results table). Each slot always exists and is simply refilled or emptied."""
     ss = st.session_state
     snap = worker.snapshot() if worker is not None else None
-    if snap is not None:
-        if snap["scanning"]:
-            st.caption("🔄 Live checker: scanning…")
-        elif snap["last_scan_ts"]:
-            left = max(0, int(worker.interval - (time.time() - snap["last_scan_ts"]))) if worker.interval else 0
-            st.caption(f"🟢 Live checker running — scan #{snap['scans']}, " + (f"next in {left}s" if worker.interval else "⚡ constant mode"))
-        if snap.get("site_counts"):
-            st.caption("📡 " + " · ".join(f"{SITE_LABELS.get(k, k)} {v}" for k, v in snap["site_counts"].items()))
-        if snap["error"]:
-            st.error(t("scan_failed", error=snap["error"]))
-        if snap["alarm_seq"] > ss.get("alarm_seq_played", 0):
-            ss["alarm_seq_played"] = snap["alarm_seq"]
-            ss["alarm_html"] = _alarm_html(snap["alarm_hits"])
-            ss["alarm_until"] = time.time() + 10
-    # Same html every poll => the iframe is kept (not reloaded), so the siren plays on.
+    status_slot, alarm_slot, results_slot = st.empty(), st.empty(), st.empty()
+
+    with status_slot.container():
+        if snap is not None:
+            if snap["scanning"]:
+                st.caption("🔄 Live checker: scanning…")
+            elif snap["last_scan_ts"]:
+                left = max(0, int(worker.interval - (time.time() - snap["last_scan_ts"]))) if worker.interval else 0
+                st.caption(f"🟢 Live checker running — scan #{snap['scans']}, " + (f"next in {left}s" if worker.interval else "⚡ constant mode"))
+            if snap.get("site_counts"):
+                st.caption("📡 " + " · ".join(f"{SITE_LABELS.get(k, k)} {v}" for k, v in snap["site_counts"].items()))
+            if snap["error"]:
+                st.error(t("scan_failed", error=snap["error"]))
+            if snap["alarm_seq"] > ss.get("alarm_seq_played", 0):
+                ss["alarm_seq_played"] = snap["alarm_seq"]
+                ss["alarm_html"] = _alarm_html(snap["alarm_hits"])
+                ss["alarm_until"] = time.time() + 10
+
+    # Same html every poll => the iframe is kept (not reloaded), so the sound plays on.
     if time.time() < ss.get("alarm_until", 0):
         import streamlit.components.v1 as components
-        components.html(ss["alarm_html"], height=80)
+        with alarm_slot.container():
+            components.html(ss["alarm_html"], height=80)
+    else:
+        alarm_slot.empty()
+
     candidates = [v for v in (ss.get("last_view"), snap["view"] if snap else None) if v]
-    if candidates:
-        _render_view(max(candidates, key=lambda v: v["ts"]))
+    with results_slot.container():
+        if candidates:
+            _render_view(max(candidates, key=lambda v: v["ts"]))
 
 
 st.fragment(run_every=3 if worker is not None else None)(_live_panel)()
@@ -1334,6 +1348,10 @@ with st.expander(t("chain_header"), expanded=False):
             except Exception as exc:
                 st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
     def _chain_panel() -> None:
+        with st.empty().container():   # one fixed slot, see _live_panel
+            _chain_body()
+
+    def _chain_body() -> None:
         ss = st.session_state
         snap = worker.snapshot() if worker is not None else None
         use_live = snap and snap["chains"] is not None and snap["chains_ts"] >= ss.get("chain_view_ts", 0)
@@ -1420,6 +1438,10 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
             except Exception as exc:
                 st.error(t("scan_failed", error=f"{type(exc).__name__}: {exc}"))
     def _arb_panel() -> None:
+        with st.empty().container():   # one fixed slot, see _live_panel
+            _arb_body()
+
+    def _arb_body() -> None:
         snap = worker.snapshot() if worker is not None else None
         cands = [v for v in (st.session_state.get("arb_view3"), snap["arb"] if snap else None) if v]
         if not cands:
