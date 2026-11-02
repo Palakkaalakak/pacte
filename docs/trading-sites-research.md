@@ -15,7 +15,7 @@ response checked for structured trade data.
 
 All four are resolved against the Gamersberg catalog by item name, so every site is priced with
 the same numbers and results stay comparable. Spelling differences are handled by an alias table
-(`Dragon (West)` → `West Dragon`, `Magnet` → `Magnet Fruit`, ...). A
+(`Dragon (West)` → `West Dragon`, `Magnet` → `Magnet Fruit`, `Hellfire` → `Hellfire Gas`, ...). A
 trade containing an item that can't be resolved (or a placeholder like "Or"/"Adds") is skipped
 rather than guessed.
 
@@ -43,6 +43,4 @@ Result: 8 of 11 ads came back with exactly the raw items; the other 3 were corre
 the in-game 40% Beli-balance rule (the game itself would block those trades). A Gravity-only
 inventory returned no trades from any site, as it should.
 
-Short name `Hellfire` (very common on FantasyBlox) is deliberately NOT aliased to `Hellfire Gas`:
-ads offering e.g. an Ember Dragon (7.6B) for "Hellfire" only look like a +1,250% win if that guess
-is right, and it is unverified.
+Short name `Hellfire` (very common on FantasyBlox) is aliased to `Hellfire Gas` (confirmed by the user).

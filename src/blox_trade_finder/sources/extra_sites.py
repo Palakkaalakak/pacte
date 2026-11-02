@@ -35,6 +35,7 @@ ALIASES: dict[str, tuple[str, str]] = {
     "dragon (west)": ("West Dragon", "Permanent West Dragon"),
     "dragon (east)": ("East Dragon", "Permanent East Dragon"),
     "magnet": ("Magnet Fruit", "Permanent Magnet"),
+    "hellfire": ("Hellfire Gas", "Permanent Hellfire Gas"),
 }
 
 
