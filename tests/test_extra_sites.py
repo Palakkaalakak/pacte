@@ -99,5 +99,11 @@ def test_page_is_too_old_and_fantasyblox_stops_paging() -> None:
     assert calls == [0, 15] and [t["id"] for t in out] == ["1", "2"]            # page 3 (all older) never requested
 
 
-def test_fantasyblox_links_point_at_the_real_trade_page() -> None:
-    assert FantasyBlox.page_url == "https://fantasyblox.com/games/blox-fruits/trade"
+def test_fantasyblox_links_open_the_posters_profile() -> None:
+    raw = [{"id": "7", "kind": "normal", "username": "a", "roblox_id": "123", "created_at": "2026-11-02T01:00:00.000Z",
+            "offering": [{"name": "Venom", "mode": "normal"}], "wants": [{"name": "Pain", "mode": "normal"}]}]
+    site = _site(FantasyBlox)
+    import blox_trade_finder.sources.extra_sites as mod
+    mod._FB_VALUES.update(at=1e18, map={("x", False): 1})   # skip the values request
+    out = site.build(raw, _cat())
+    assert out[0].url == "https://fantasyblox.com/profile/123?ad=7"

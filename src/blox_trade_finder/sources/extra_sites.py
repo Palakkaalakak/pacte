@@ -193,7 +193,12 @@ class FantasyBlox(_Site):
                           self.id, own)
             if give is None or want is None:
                 continue
-            lst = _listing(self.id, t["id"], self.page_url, t.get("username"), give, want, t["created_at"])
+            # FantasyBlox has no page per ad (its trade page keeps search state in the browser, not
+            # in the URL). The poster's profile page is the closest specific link: it opens on
+            # that trader, so you can see/contact them. ?ad= keeps each link unique.
+            rid = t.get("roblox_id")
+            base = f"https://fantasyblox.com/profile/{rid}" if rid else self.page_url
+            lst = _listing(self.id, t["id"], base, t.get("username"), give, want, t["created_at"])
             if lst:
                 out.append(lst)
         return out
