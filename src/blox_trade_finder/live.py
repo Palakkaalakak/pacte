@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from typing import Callable
 
-from blox_trade_finder.core.arbitrage import SITE_VALUE_KEYS, find_item_arbitrage, item_gaps
+from blox_trade_finder.core.arbitrage import SITE_VALUE_KEYS, find_item_arbitrage, item_gaps, platform_inflation
 from blox_trade_finder.core.chains import find_chains
 from blox_trade_finder.core.normalize import inventory_counts
 from blox_trade_finder.models import Goals, Inventory, Match
@@ -178,9 +178,14 @@ def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dic
         "gaps": [{
             "Item": g.name,
             **{SITE_VALUE_KEYS[k]: (format_value(g.values[k]) if k in g.values else "") for k in gap_cols},
-            "Ratio": f"{g.ratio:.2f}x", "Higher on": g.higher_on, "Lower on": g.lower_on,
-            "Gap": format_value(g.gap),
+            "Class": g.cls,
+            "Raw ratio": f"{g.raw_ratio:.2f}x", "Adjusted ratio": f"{g.ratio:.2f}x",
+            "Higher on": g.higher_on, "Lower on": g.lower_on, "Gap (adj.)": format_value(g.gap),
         } for g in gaps[:300]],
+        "inflation": [
+            {"Class": cls, **{SITE_VALUE_KEYS[k]: f"{lvl:.2f}x ({n})" for k, (lvl, n) in by_site.items() if k in SITE_VALUE_KEYS}}
+            for cls, by_site in sorted(platform_inflation(listings).items())
+        ],
         "trades": [{
             "Item": x.item,
             "Buy: you pay": ", ".join(i.name for i in x.buy.want),

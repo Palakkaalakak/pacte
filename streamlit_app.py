@@ -1380,6 +1380,12 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
             )
         else:
             st.info("No same-item arbitrage right now.")
+        if _arb.get("inflation"):
+            st.subheader("Platform price levels (vs Gamersberg)")
+            st.caption("Typical price ratio of each site against Gamersberg, per kind of item, with the number "
+                       "of items compared. 1.10x = that site prices the whole class ~10% higher, so a 10% gap "
+                       "there is normal. Value gaps below are adjusted for this.")
+            st.dataframe(pd.DataFrame(_arb["inflation"]), use_container_width=True, hide_index=True)
         st.subheader(f"Value gaps ({len(_arb['gaps'])})")
         if _arb["gaps"]:
             st.dataframe(pd.DataFrame(_arb["gaps"]), use_container_width=True, hide_index=True)

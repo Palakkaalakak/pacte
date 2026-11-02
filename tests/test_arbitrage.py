@@ -66,3 +66,19 @@ def test_arbitrage_priced_on_any_sites_numbers() -> None:
     sell = _l("sell", [x], [g], source="bfvgg")
     assert find_item_arbitrage([buy, sell], value_basis="gamersberg")[0].profit == 40       # 120 - 80
     assert find_item_arbitrage([buy, sell], value_basis="tradehub", min_pct=0.1)[0].profit == 10  # 60 - 50
+
+
+def test_platform_inflation_is_removed_from_gaps() -> None:
+    from blox_trade_finder.core.arbitrage import platform_inflation
+    mk = lambda n, gb, th, i: CatalogItem(id=i, name=n, type="Natural", values={"gamersberg": gb, "tradehub": th})
+    # tradehub prices every fruit 10% higher, except Odd which it prices 60% higher
+    items = [mk("A", 100, 110, 1), mk("B", 200, 220, 2), mk("C", 300, 330, 3), mk("D", 400, 440, 4), mk("Odd", 100, 160, 5)]
+    ls = [_l(f"l{i}", [it], [items[(i + 1) % 5]]) for i, it in enumerate(items)]
+    lvl, n = platform_inflation(ls)["Physical fruits"]["tradehub"]
+    assert round(lvl, 2) == 1.10 and n == 5
+    names = [g.name for g in item_gaps(ls, min_ratio=1.25)]
+    assert names == ["Odd"]                                        # 1.6x raw -> 1.45x adjusted; the 1.1x ones vanish
+    raw = [g.name for g in item_gaps(ls, min_ratio=1.05, adjust_inflation=False)]
+    assert set(raw) == {"A", "B", "C", "D", "Odd"}                 # without adjustment they all look like gaps
+    g = next(g for g in item_gaps(ls, min_ratio=1.25) if g.name == "Odd")
+    assert round(g.raw_ratio, 2) == 1.60 and round(g.ratio, 2) == 1.45

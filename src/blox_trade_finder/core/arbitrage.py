@@ -27,23 +27,52 @@ SITE_VALUE_KEYS: dict[str, str] = {
 }
 
 
+def item_class(item: CatalogItem) -> str:
+    """Coarse class used to compare like with like when judging site-wide price levels."""
+    name = item.name.strip().lower()
+    typ = (item.type or "").strip().lower()
+    if name.startswith("permanent "):
+        return "Permanent"
+    if "skin" in typ or name.endswith(" skin"):
+        return "Skins"
+    if typ in ("", "0", "nan", "none") or "gamepass" in typ or "scroll" in name:
+        return "Other (limiteds, gamepasses, scrolls...)"
+    return "Physical fruits"
+
+
+REFERENCE = GB          # every site's level is expressed relative to Gamersberg's
+MIN_CLASS_ITEMS = 3     # fewer shared items than this => no reliable level, assume 1.0
+
+
 @dataclass
 class ItemGap:
     name: str
-    values: dict[str, int] = field(default_factory=dict)   # site id -> that site's value (> 0)
+    values: dict[str, int] = field(default_factory=dict)   # site id -> that site's raw value (> 0)
+    cls: str = ""
+    adjusted: dict[str, float] = field(default_factory=dict)  # values put on Gamersberg's price level
+
+    def _vals(self, adjusted: bool) -> dict:
+        return self.adjusted if (adjusted and self.adjusted) else self.values
 
     @property
     def high_key(self) -> str:
-        return max(self.values, key=self.values.get)
+        v = self._vals(True)
+        return max(v, key=v.get)
 
     @property
     def low_key(self) -> str:
-        return min(self.values, key=self.values.get)
+        v = self._vals(True)
+        return min(v, key=v.get)
+
+    @property
+    def raw_ratio(self) -> float:
+        return max(self.values.values()) / min(self.values.values())
 
     @property
     def ratio(self) -> float:
-        lo = self.values[self.low_key]
-        return self.values[self.high_key] / lo if lo else float("inf")
+        """Gap after removing each site's general price level for this class."""
+        v = self._vals(True)
+        return max(v.values()) / min(v.values())
 
     @property
     def higher_on(self) -> str:
@@ -55,7 +84,8 @@ class ItemGap:
 
     @property
     def gap(self) -> int:
-        return self.values[self.high_key] - self.values[self.low_key]
+        v = self._vals(True)
+        return int(max(v.values()) - min(v.values()))
 
 
 @dataclass
@@ -108,18 +138,52 @@ def _value(item: CatalogItem, key: str, maps: dict[str, dict[str, int]]) -> int:
     return item.values.get(key, 0) or maps.get(key, {}).get(item.name.lower(), 0)
 
 
-def item_gaps(listings: list[Listing], *, min_ratio: float = 1.25, min_gap: int = 0) -> list[ItemGap]:
+def _item_table(listings: list[Listing]) -> dict[str, tuple[str, dict[str, int]]]:
     maps = value_maps(listings)
-    names: dict[str, str] = {}
+    info: dict[str, tuple[str, str]] = {}
     for lst in listings:
         for item in (*lst.give, *lst.want):
-            names.setdefault(item.name.lower(), item.name)
+            info.setdefault(item.name.lower(), (item.name, item_class(item)))
+    return {
+        lower: (disp, cls, {k: m[lower] for k, m in maps.items() if lower in m})
+        for lower, (disp, cls) in info.items()
+    }
+
+
+def platform_inflation(listings: list[Listing]) -> dict[str, dict[str, tuple[float, int]]]:
+    """class -> site -> (median price ratio vs Gamersberg over the items both price, how many).
+    1.10 means that site prices this class ~10% higher than Gamersberg across the board, so a
+    10% gap on one item there is just the site's normal level, not an opportunity."""
+    import statistics
+    ratios: dict[str, dict[str, list[float]]] = {}
+    for _, cls, vals in _item_table(listings).values():
+        ref = vals.get(REFERENCE)
+        if not ref:
+            continue
+        for k, v in vals.items():
+            if k != REFERENCE:
+                ratios.setdefault(cls, {}).setdefault(k, []).append(v / ref)
+    return {
+        cls: {k: (statistics.median(r), len(r)) for k, r in by_site.items()}
+        for cls, by_site in ratios.items()
+    }
+
+
+def item_gaps(listings: list[Listing], *, min_ratio: float = 1.25, min_gap: int = 0,
+              adjust_inflation: bool = True) -> list[ItemGap]:
+    """Items two or more sites price differently. With `adjust_inflation` each site's value is
+    first divided by that site's typical level for the item's class (see platform_inflation), so
+    only a gap bigger than the site's usual markup counts."""
+    infl = platform_inflation(listings) if adjust_inflation else {}
     gaps = []
-    for lower, display in names.items():
-        values = {k: m[lower] for k, m in maps.items() if lower in m}
+    for display, cls, values in _item_table(listings).values():
         if len(values) < 2:
             continue                       # need two sites' opinions to have a gap
-        g = ItemGap(display, values)
+        adjusted = {}
+        for k, v in values.items():
+            level, n = infl.get(cls, {}).get(k, (1.0, 0))
+            adjusted[k] = v / level if (level and n >= MIN_CLASS_ITEMS) else float(v)
+        g = ItemGap(display, values, cls, adjusted)
         if g.ratio >= min_ratio and g.gap >= min_gap:
             gaps.append(g)
     gaps.sort(key=lambda g: (-g.gap, -g.ratio))
