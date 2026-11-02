@@ -18,7 +18,7 @@ def _site(cls):
 
 
 def test_four_sites_registered() -> None:
-    assert set(EXTRA_SITES) == {"fantasyblox", "tradehub", "tradebloxfruit", "bfvgg"}
+    assert set(EXTRA_SITES) == {"fantasyblox", "tradehub", "tradebloxfruit", "bfvgg", "bloxfruitsai"}
 
 
 def test_aliases_and_permanent_resolution() -> None:
@@ -107,3 +107,17 @@ def test_fantasyblox_links_open_the_posters_profile() -> None:
     mod._FB_VALUES.update(at=1e18, map={("x", False): 1})   # skip the values request
     out = site.build(raw, _cat())
     assert out[0].url == "https://fantasyblox.com/profile/123?ad=7"
+
+
+def test_periphery_bloxfruitsai_only_resolves_clean_ads() -> None:
+    from blox_trade_finder.scan import DEFAULT_SOURCES, VALID_SOURCES
+    from blox_trade_finder.sources.extra_sites import BloxFruitsAI, PERIPHERY_SITES
+    assert PERIPHERY_SITES == ("bloxfruitsai",) and "bloxfruitsai" in VALID_SOURCES and "bloxfruitsai" not in DEFAULT_SOURCES
+    raw = [
+        {"id": "a", "status": "open", "created_at": "2026-11-01T20:28:40+00:00", "display_name": "T", "offering": ["venom"], "wanting": "Pain"},
+        {"id": "b", "status": "open", "created_at": "2026-11-01T20:28:40+00:00", "display_name": "T", "offering": ["venom"], "wanting": "Dragon and or Dough"},
+        {"id": "c", "status": "open", "created_at": "2026-11-01T20:28:40+00:00", "display_name": "T", "offering": ["perm-venom"], "wanting": "west dragon"},
+    ]
+    out = _site(BloxFruitsAI).build(raw, _cat())
+    assert [l.id for l in out] == ["bloxfruitsai:a", "bloxfruitsai:c"]
+    assert out[1].give[0].name == "Permanent Venom"

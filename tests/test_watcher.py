@@ -8,7 +8,7 @@ import pytest
 
 from blox_trade_finder.emailer import EmailConfig, matches_to_html, matches_to_text
 from blox_trade_finder.models import CatalogItem, Listing, Match
-from blox_trade_finder.scan import VALID_SOURCES
+from blox_trade_finder.scan import DEFAULT_SOURCES, VALID_SOURCES
 from blox_trade_finder.watcher import SeenTracker, WatcherConfig, _alert_names, load_config, split_alerts
 
 NOW = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
@@ -82,7 +82,7 @@ def test_watcher_config_defaults(tmp_path: Path) -> None:
     config = load_config(path)
     assert config.scan_interval_minutes == 10
     assert config.digest_interval_minutes == 30
-    assert config.sources == list(VALID_SOURCES)  # every supported site by default
+    assert config.sources == list(DEFAULT_SOURCES)  # every main site; periphery sites are opt-in
     assert config.email is None
 
 

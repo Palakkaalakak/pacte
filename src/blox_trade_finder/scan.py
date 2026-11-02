@@ -22,7 +22,7 @@ from blox_trade_finder.core.normalize import (
 from blox_trade_finder.core.overrides import apply_overrides
 from blox_trade_finder.models import Goals, Inventory, Match
 from blox_trade_finder.sources.bloxfruitsvalues import BloxFruitsValuesSource
-from blox_trade_finder.sources.extra_sites import EXTRA_SITES
+from blox_trade_finder.sources.extra_sites import EXTRA_SITES, PERIPHERY_SITES
 from blox_trade_finder.sources.gamersberg import GamersbergSource
 from blox_trade_finder.store import TradeStore
 
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 BFV_STORE_MAX = 3000
 VALID_SOURCES = ("gamersberg", "bloxfruitsvalues", *EXTRA_SITES)
-DEFAULT_SOURCES = VALID_SOURCES  # every site, unless the caller narrows it
+DEFAULT_SOURCES = tuple(s for s in VALID_SOURCES if s not in PERIPHERY_SITES)  # periphery sites are opt-in
 
 # Hard ceiling on how long we wait for either source's fetch thread. Every
 # individual HTTP request already has its own timeout + bounded retries, but a

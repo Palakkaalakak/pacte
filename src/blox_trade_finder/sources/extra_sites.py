@@ -342,6 +342,50 @@ class BloxFruitsValuesGG(_Site):
         return out
 
 
+# ------------------------------------------------------------------ periphery: bloxfruitsai.com
+def _slug_to_name(slug: str, by_name: dict[str, CatalogItem]) -> CatalogItem | None:
+    """'perm-dragon-token' / 'gp_2x' / 'Hell fire gas' -> catalog item, or None. Free-text
+    wants like 'Dragon and or Dough' are not a single definite item, so they never resolve."""
+    text = re.sub(r"[-_]+", " ", (slug or "").strip().lower())
+    if not text or re.search(r"\b(or|and|any|add|adds|offers?)\b", text):
+        return None
+    if text.startswith("perm "):
+        text = "permanent " + text[5:]
+    text = {"eastern dragon": "east dragon", "western dragon": "west dragon", "hell fire gas": "hellfire gas",
+            "magnet": "magnet fruit"}.get(text, text)
+    return by_name.get(text)
+
+
+class BloxFruitsAI(_Site):
+    """Tiny board (a handful of ads) whose names are lowercase slugs plus free text, so only the
+    clean ads resolve. Included as a periphery source: cheap (one page) and occasionally useful."""
+    id, label, poll_seconds = "bloxfruitsai", "BloxFruitsAI", 10.0
+    page_url = "https://www.bloxfruitsai.com/trading"
+    periphery = True
+
+    def fetch_raw(self, latest: bool = False, max_age_minutes: float | None = None) -> list[dict]:
+        return _extract_json_array(self._get("/trading").text, "initialAds")
+
+    def build(self, raw, catalog):
+        by_name = {i.name.lower(): i for i in catalog.items}
+        out = []
+        for a in raw:
+            if a.get("status") != "open":
+                continue
+            offered = a.get("offering") if isinstance(a.get("offering"), list) else [a.get("offering")]
+            wanted = a.get("wanting") if isinstance(a.get("wanting"), list) else [a.get("wanting")]
+            give = [_slug_to_name(x, by_name) for x in offered]
+            want = [_slug_to_name(x, by_name) for x in wanted]
+            if not give or not want or None in give or None in want:
+                continue
+            lst = _listing(self.id, a["id"], self.page_url, a.get("display_name"), give, want, a["created_at"])
+            if lst:
+                out.append(lst)
+        return out
+
+
 EXTRA_SITES: dict[str, type[_Site]] = {
-    s.id: s for s in (FantasyBlox, TradeHub, TradeBloxFruit, BloxFruitsValuesGG)
+    s.id: s for s in (FantasyBlox, TradeHub, TradeBloxFruit, BloxFruitsValuesGG, BloxFruitsAI)
 }
+PERIPHERY_SITES: tuple[str, ...] = tuple(sid for sid, cls in EXTRA_SITES.items() if getattr(cls, "periphery", False))
+

@@ -980,16 +980,23 @@ scam_cfg = {
 
 # ------------------------------------------------------------------ sources
 st.header(t("header_sources"))
-from blox_trade_finder.sources.extra_sites import EXTRA_SITES
+from blox_trade_finder.sources.extra_sites import EXTRA_SITES, PERIPHERY_SITES
 
 SITE_LABELS = {
     "gamersberg": "Gamersberg", "bloxfruitsvalues": "bloxfruitsvalues.com",
     **{sid: cls.label for sid, cls in EXTRA_SITES.items()},
 }
+MAIN_SITES = [sid for sid in SITE_LABELS if sid not in PERIPHERY_SITES]
+use_periphery = st.toggle(
+    "Include periphery sites (smaller boards: " + ", ".join(SITE_LABELS[s] for s in PERIPHERY_SITES) + ")",
+    value=False, key="use_periphery",
+)
 selected_sources = st.multiselect(
-    "Sites to scan", list(SITE_LABELS), default=list(SITE_LABELS),
+    "Sites to scan", MAIN_SITES, default=MAIN_SITES,
     format_func=lambda sid: SITE_LABELS[sid], help=t("sources_help"), key="sources_pick",
-) or list(SITE_LABELS)
+) or list(MAIN_SITES)
+if use_periphery:
+    selected_sources = [*selected_sources, *PERIPHERY_SITES]
 
 # ------------------------------------------------------------------- action
 find_clicked = st.button(t("find_trades"), type="primary", use_container_width=True)

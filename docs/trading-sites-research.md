@@ -19,6 +19,20 @@ the same numbers and results stay comparable. Spelling differences are handled b
 trade containing an item that can't be resolved (or a placeholder like "Or"/"Adds") is skipped
 rather than guessed.
 
+## Periphery (opt-in toggle)
+
+| Site | Notes |
+|---|---|
+| **BloxFruitsAI** (bloxfruitsai.com) | Tiny board (about 7 ads) embedded in the `/trading` page; names are lowercase slugs and free text ("Dragon and or Dough"), so only the clean ads resolve (4 of 7 in testing). Enabled with the "Include periphery sites" toggle; not part of the default site set. |
+
+## Checked, not usable
+
+| Site | Why |
+|---|---|
+| bloxfruits.trade | Trade offers need a login (`/api/offers` answers "missing bearer token"); no open ad feed. |
+| bloxfruittrading.com | A copy of another game's site template (its text talks about fish); no usable feed. |
+| bloxvalues.net, bloxfruittradecalculator.com | Value lists / calculators only, no trade-ad board. |
+
 ## Not integrated
 
 | Site | Why |
