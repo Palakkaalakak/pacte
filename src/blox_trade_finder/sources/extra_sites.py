@@ -354,6 +354,33 @@ class BloxFruitsValuesGG(_Site):
         return out
 
 
+# ------------------------------------------------------------------ bloxfruitscalc.com
+class BloxFruitsCalc(_Site):
+    """bloxfruitscalc.com 'Trade Hub': the /trades page is server-rendered with the newest 24 ads
+    (about 10 minutes of traffic), and every ad has its own page at /trades/<id>.
+    `hasItems` is what the poster gives, `wantsItems` what they ask for; `type` 'p' = Permanent."""
+    id, label, poll_seconds = "bloxfruitscalc", "BloxFruitsCalc", 4.0   # ~300 KB per page
+    page_url = "https://bloxfruitscalc.com/trades"
+
+    def fetch_raw(self, latest: bool = False, max_age_minutes: float | None = None) -> list[dict]:
+        return _extract_json_array(self._get("/trades").text, "initialTrades")
+
+    def build(self, raw, catalog):
+        by_name = {i.name.lower(): i for i in catalog.items}
+        out = []
+        for t in raw:
+            perm = lambda e: e.get("type") == "p"
+            give = _items(t.get("hasItems") or [], by_name, lambda e: e.get("name"), perm, lambda e: e.get("qty") or e.get("quantity"))
+            want = _items(t.get("wantsItems") or [], by_name, lambda e: e.get("name"), perm, lambda e: e.get("qty") or e.get("quantity"))
+            if not give or not want or not t.get("timestamp"):
+                continue            # unknown item, nothing asked for, or no usable time
+            lst = _listing(self.id, t["id"], f"{self.page_url}/{t['id']}",
+                           t.get("robloxUsername") or t.get("traderName"), give, want, t["timestamp"] / 1000)
+            if lst:
+                out.append(lst)
+        return out
+
+
 # ------------------------------------------------------------------ periphery: bloxfruitsai.com
 def _slug_to_name(slug: str, by_name: dict[str, CatalogItem]) -> CatalogItem | None:
     """'perm-dragon-token' / 'gp_2x' / 'Hell fire gas' -> catalog item, or None. Free-text
@@ -397,7 +424,7 @@ class BloxFruitsAI(_Site):
 
 
 EXTRA_SITES: dict[str, type[_Site]] = {
-    s.id: s for s in (FantasyBlox, TradeHub, TradeBloxFruit, BloxFruitsValuesGG, BloxFruitsAI, BloxValuesNet)
+    s.id: s for s in (FantasyBlox, TradeHub, TradeBloxFruit, BloxFruitsValuesGG, BloxFruitsCalc, BloxFruitsAI, BloxValuesNet)
 }
 PERIPHERY_SITES: tuple[str, ...] = tuple(sid for sid, cls in EXTRA_SITES.items() if getattr(cls, "periphery", False))
 

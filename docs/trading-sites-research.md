@@ -19,6 +19,8 @@ the same numbers and results stay comparable. Spelling differences are handled b
 trade containing an item that can't be resolved (or a placeholder like "Or"/"Adds") is skipped
 rather than guessed.
 
+| **BloxFruitsCalc** (bloxfruitscalc.com/trades) | Busy "Trade Hub" (24 ads cover about 10 minutes). The `/trades` page is server-rendered with the newest 24 ads (`initialTrades`: `hasItems` = poster gives, `wantsItems` = asks, `type` p/n, epoch-ms timestamp); every ad also has its own page, `/trades/<id>`. Polled every 4 s in constant mode (about 300 KB per page). |
+
 ## Periphery (opt-in toggle)
 
 | Site | Notes |

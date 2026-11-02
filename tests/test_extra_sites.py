@@ -18,7 +18,7 @@ def _site(cls):
 
 
 def test_four_sites_registered() -> None:
-    assert set(EXTRA_SITES) == {"fantasyblox", "tradehub", "tradebloxfruit", "bfvgg", "bloxfruitsai", "bloxvalues"}
+    assert set(EXTRA_SITES) == {"fantasyblox", "tradehub", "tradebloxfruit", "bfvgg", "bloxfruitscalc", "bloxfruitsai", "bloxvalues"}
 
 
 def test_aliases_and_permanent_resolution() -> None:
@@ -131,3 +131,14 @@ def test_bloxvalues_net_uses_wordpress_route_and_utc_naive_times() -> None:
             "requesting": [{"name": "Pain", "mode": "regular", "qty": 1, "value": 10}]}]
     out = _site(BloxValuesNet).build(raw, _cat())
     assert out[0].created_at.tzinfo is not None and out[0].created_at.hour == 7 and out[0].source == "bloxvalues"
+
+
+def test_bloxfruitscalc_build_permanent_flag_epoch_ms_and_per_ad_url() -> None:
+    from blox_trade_finder.sources.extra_sites import BloxFruitsCalc
+    raw = [{"id": "abc123", "traderName": "T", "robloxUsername": "ru", "timestamp": 1793608780073,
+            "hasItems": [{"name": "Venom", "type": "p", "value": 0}], "wantsItems": [{"name": "West Dragon", "type": "n", "value": 0}]},
+           {"id": "x", "hasItems": [{"name": "Venom", "type": "n"}], "wantsItems": []}]
+    out = _site(BloxFruitsCalc).build(raw, _cat())
+    assert len(out) == 1 and out[0].give[0].name == "Permanent Venom" and out[0].want[0].name == "West Dragon"
+    assert out[0].url.startswith("https://bloxfruitscalc.com/trades/abc123") and out[0].created_at.year == 2026
+    assert out[0].poster_name == "ru"
