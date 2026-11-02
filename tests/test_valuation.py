@@ -43,3 +43,23 @@ def test_both_spellings_match_everywhere() -> None:
         inv = Inventory(items=[InventoryEntry(name=spelling)])
         assert check_inventory_names(inv, cat) == []
         assert inventory_counts(inv)["scarlet ghost"] == 1
+
+
+def test_highest_across_sites_inflation_adjusted() -> None:
+    from blox_trade_finder.core.valuation import HIGHEST_ADJUSTED, HIGHEST_ADJUSTED_PLATFORM
+    cat = Catalog(items=[CatalogItem(id=1, name="Venom", type="Natural", values={"gamersberg": 100})],
+                  version=1, fetched_at=datetime.now(timezone.utc))
+    inv = Inventory(items=[InventoryEntry(name="Venom")])
+    site_maps = {"gamersberg": {"venom": 100}, "tradehub": {"venom": 130}, "bfvgg": {"venom": 110}}
+    # tradehub runs 30% high on Natural fruits (n=5 items), bfvgg is level; platform-wide tradehub is 1.15
+    inflation = {"Physical fruits": {"tradehub": (1.30, 5), "bfvgg": (1.00, 5)}}
+    wide = {"tradehub": (1.15, 9), "bfvgg": (1.00, 9)}
+    row = value_inventory(inv, cat, HIGHEST_ADJUSTED, None, site_maps, inflation, wide)[0]
+    assert row.unit == 110                    # tradehub 130/1.30 = 100, gamersberg 100, bfvgg 110 -> highest is bfvgg
+    row = value_inventory(inv, cat, HIGHEST_ADJUSTED_PLATFORM, None, site_maps, inflation, wide)[0]
+    assert row.unit == 113                    # tradehub 130/1.15 = 113 now beats bfvgg's 110
+    raw_highest = max(site_maps[s]["venom"] for s in site_maps)
+    assert raw_highest == 130                 # without adjusting, the inflated site would have won
+    # too few shared items to measure a level -> no adjustment
+    thin = {"Physical fruits": {"tradehub": (1.30, 2)}}
+    assert value_inventory(inv, cat, HIGHEST_ADJUSTED, None, site_maps, thin, {})[0].unit == 130

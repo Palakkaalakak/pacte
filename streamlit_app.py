@@ -803,21 +803,31 @@ with st.expander("💰 Account value"):
     if not inventory.items:
         st.info(t("need_item_warning"))
     else:
-        from blox_trade_finder.core.arbitrage import value_maps
-        from blox_trade_finder.core.valuation import value_inventory
+        from blox_trade_finder.core.arbitrage import platform_inflation, platform_wide_inflation, value_maps
+        from blox_trade_finder.core.valuation import HIGHEST_ADJUSTED, HIGHEST_ADJUSTED_PLATFORM, value_inventory
         # Site prices come from the last scan (the live checker's or a manual one).
         _aw = st.session_state.get("live_worker")  # the worker object is created further down the page
         _scan_cache = (_aw.snapshot()["listings"] if _aw is not None else None) or st.session_state.get("last_listings")
         _site_maps = {k: m for k, m in value_maps(_scan_cache[1]).items() if m} if _scan_cache else {}
         _av_options = ["gamersberg", "fruityblox", "bloxfruit", *[k for k in _site_maps if k != "gamersberg"], "average"]
+        if _scan_cache:   # needs scanned prices from several sites to measure each site's price level
+            _av_options += [HIGHEST_ADJUSTED, HIGHEST_ADJUSTED_PLATFORM]
         _av_basis = st.selectbox(
             "Value source", _av_options,
-            format_func=lambda b: "Average of all sources" if b == "average" else VALUE_BASIS_LABELS.get(b, b),
+            format_func=lambda b: {
+                "average": "Average of all sources",
+                "highest_adjusted": "Highest across sites, inflation-adjusted (per item class)",
+                "highest_adjusted_platform": "Highest across sites, inflation-adjusted (platform-wide)",
+            }.get(b, VALUE_BASIS_LABELS.get(b, b)),
             key="av_basis",
             help="Site sources appear after a scan has run (their numbers come from the scanned ads).",
         )
         try:
-            _rows = value_inventory(inventory, _catalog_cached(), _av_basis, custom_values, _site_maps)
+            _rows = value_inventory(
+                inventory, _catalog_cached(), _av_basis, custom_values, _site_maps,
+                platform_inflation(_scan_cache[1]) if _scan_cache else None,
+                platform_wide_inflation(_scan_cache[1]) if _scan_cache else None,
+            )
         except Exception as exc:
             _rows = None
             st.error(t("catalog_failed", error=f"{type(exc).__name__}: {exc}"))
