@@ -490,6 +490,55 @@ def _load_json(path: Path) -> dict:
         return json.load(f)
 
 
+# ------------------------------------------------------------ live presets
+# Presets are read from the LATEST commit on GitHub master, not from the copy
+# of the repo sitting on the server's disk. The hosted copy can lag behind (it
+# kept serving an inventory several commits old after edits were pushed), so a
+# push to master must show up on the next page load without any redeploy.
+# The local file is only a fallback when GitHub is unreachable.
+GITHUB_REPO = "Palakkaalakak/pacte"
+GITHUB_BRANCH = "master"
+REPO_ROOT = Path(__file__).parent
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _latest_master_sha() -> str:
+    """Commit SHA of the branch head (re-checked at most once a minute)."""
+    import httpx
+
+    resp = httpx.get(
+        f"https://api.github.com/repos/{GITHUB_REPO}/commits/{GITHUB_BRANCH}",
+        headers={"Accept": "application/vnd.github.sha"},
+        timeout=5,
+    )
+    resp.raise_for_status()
+    sha = resp.text.strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ValueError(f"unexpected SHA response: {sha[:60]!r}")
+    return sha
+
+
+@st.cache_data(show_spinner=False, max_entries=128)
+def _fetch_repo_json(sha: str, rel_path: str) -> dict:
+    """File contents at an exact commit (immutable, so safe to cache forever)."""
+    import httpx
+
+    resp = httpx.get(f"https://raw.githubusercontent.com/{GITHUB_REPO}/{sha}/{rel_path}", timeout=5)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _load_preset(path: Path) -> tuple[dict, str]:
+    """Load a preset from GitHub master; fall back to the local file.
+    Returns (data, where-it-came-from) so the UI can show the source."""
+    rel_path = path.relative_to(REPO_ROOT).as_posix()
+    try:
+        sha = _latest_master_sha()
+        return _fetch_repo_json(sha, rel_path), f"GitHub {GITHUB_BRANCH} @ {sha[:7]}"
+    except Exception:
+        return _load_json(path), "local file (GitHub unreachable)"
+
+
 def _safe_filename(name: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9 _-]", "", name).strip().replace(" ", "_")
     return cleaned or "inventory"
@@ -711,10 +760,12 @@ inventory_mode = st.radio(
 
 if inventory_mode == t("mode_saved"):
     inventory_choice = st.selectbox(t("saved_inventory"), list(INVENTORY_PRESETS.keys()))
-    inventory = Inventory.model_validate(_load_json(INVENTORY_PRESETS[inventory_choice]))
+    _inv_data, _inv_src = _load_preset(INVENTORY_PRESETS[inventory_choice])
+    inventory = Inventory.model_validate(_inv_data)
     with st.expander(t("see_inventory", name=inventory_choice)):
         for line in _inventory_preview_lines(inventory):
             st.write(f"- {line}")
+        st.caption(f"Source: {_inv_src}")
 elif inventory_mode == t("mode_my_saved"):
     user_invs = _list_user_inventories()
     if not user_invs:
@@ -879,7 +930,7 @@ goals_mode = st.radio(
 
 if goals_mode == t("mode_saved"):
     goals_choice = st.selectbox(t("saved_goals"), list(GOALS_PRESETS.keys()))
-    goals = Goals.model_validate(_load_json(GOALS_PRESETS[goals_choice]))
+    goals = Goals.model_validate(_load_preset(GOALS_PRESETS[goals_choice])[0])
     with st.expander(t("see_goals", name=goals_choice)):
         for line in _goals_preview_lines(goals):
             st.write(f"- {line}")
@@ -949,7 +1000,7 @@ notify_mode = st.radio("Notify", _nm_opts, index=1, horizontal=True, label_visib
 notify_cfg: dict = {}
 if notify_mode == t("notify_mode_saved"):
     _nc = st.selectbox(t("notify_saved"), list(NOTIFY_PRESETS.keys()))
-    notify_cfg = _load_json(NOTIFY_PRESETS[_nc])
+    notify_cfg = _load_preset(NOTIFY_PRESETS[_nc])[0]
 elif notify_mode == t("notify_mode_mine"):
     _mine = _list_user_notify()
     if not _mine:
