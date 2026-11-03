@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from typing import Callable
 
-from blox_trade_finder.core.arbitrage import REFERENCE, SITE_VALUE_KEYS, find_item_arbitrage, item_gaps, platform_inflation, site_norms
+from blox_trade_finder.core.arbitrage import REFERENCE, SITE_VALUE_KEYS, find_gap_exploits, find_item_arbitrage, item_gaps, platform_inflation, site_norms
 from blox_trade_finder.core.chains import find_chains
 from blox_trade_finder.core.normalize import inventory_counts
 from blox_trade_finder.models import Goals, Inventory, Match
@@ -200,6 +200,36 @@ def _gap_tables(gaps: list, gap_cols: list[str], with_platform: bool = False) ->
     return out
 
 
+EXPLOIT_KIND_LABELS = {
+    "round": "Round trip (buy cheap, sell dear)",
+    "buy": "Buy underpriced",
+    "sell": "Sell overpriced",
+}
+
+
+def _exploit_rows(exploits: list) -> list[dict]:
+    """Gap exploits as plain rows. Values are the corrected platform-wide (fair) values."""
+    rows = []
+    for e in exploits:
+        rows.append({
+            "Type": EXPLOIT_KIND_LABELS.get(e.kind, e.kind),
+            "Gap item": e.item,
+            "Gap": f"{e.edge:.2f}x",
+            "Cheap on": ", ".join(e.cheap_on),
+            "Dear on": ", ".join(e.dear_on),
+            "You pay": ", ".join(i.name for i in e.pay),
+            "You get": ", ".join(i.name for i in e.receive),
+            "Sites": " → ".join(l.source for l in e.legs),
+            "Oldest leg": f"{e.oldest_minutes:.0f}m",
+            "Cost (fair)": format_value(round(e.cost)),
+            "Value (fair)": format_value(round(e.revenue)),
+            "Profit (fair)": f"{format_value(e.profit)} ({e.profit_pct:+.0%})",
+            "Link 1": e.legs[0].url,
+            "Link 2": e.legs[1].url if len(e.legs) > 1 else None,
+        })
+    return rows
+
+
 def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dict | None) -> dict:
     """Arbitrage results as PLAIN rows (dicts/strings only). Plain data can never
     break the page after a redeploy changes a class, unlike stored objects."""
@@ -213,9 +243,16 @@ def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dic
     trades = [x for x in trades if not is_scam(x.profit, x.profit_pct, scam_cfg)]
     gaps = item_gaps(listings, min_ratio=cfg["min_ratio"])
     gap_cols = [k for k in SITE_VALUE_KEYS if any(k in g.values for g in gaps)]  # only sites that appear
+    exploits = find_gap_exploits(
+        listings, min_edge=cfg.get("exploit_edge", 1.10), min_pct=cfg.get("exploit_pct", 0.05),
+        max_age_minutes=cfg["max_age_minutes"],
+        inventory_counts=inventory_counts if cfg["only_mine"] else None,
+    )
+    exploits = [e for e in exploits if not is_scam(e.profit, e.profit_pct, scam_cfg)]
     return {
         "ts": time.time(),
         "gaps": _gap_tables(gaps[:300], gap_cols, cfg.get("platform_table", False)),
+        "exploits": _exploit_rows(exploits[:300]),
         "trades": [{
             "Item": x.item,
             "Buy: you pay": ", ".join(i.name for i in x.buy.want),

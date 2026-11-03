@@ -1129,6 +1129,7 @@ def _arb_cfg() -> dict:
         cross_site_only=ss.get("arb_cross", True), max_age_minutes=ss.get("arb_age", 10) or None,
         min_ratio=ss.get("arb_ratio", 1.001), only_mine=ss.get("arb_mine", True),
         judge_by_norm=ss.get("arb_norm", False), platform_table=ss.get("arb_platform", False),
+        exploit_edge=ss.get("arb_exploit_edge", 1.10), exploit_pct=ss.get("arb_exploit_pct", 5) / 100,
     )
 
 
@@ -1470,6 +1471,20 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
         help="The 'Corrected' table adjusts per item class (e.g. limiteds vs permanents). This one uses a "
              "single average level per site, measured against Gamersberg.",
     )
+    st.markdown("**🎯 Gap exploits** (trades that cash in on the value gaps, judged on corrected platform-wide values)")
+    _ex1, _ex2 = st.columns(2)
+    with _ex1:
+        st.number_input(
+            "Min corrected gap to exploit (x)", 1.0, None, 1.10, step=0.05, format="%.2f", key="arb_exploit_edge",
+            help="Only items whose platform-wide corrected values differ by at least this much between "
+                 "sites. 1.10 = the dearest site prices it 10% above the cheapest, after removing each "
+                 "site's overall price level.",
+        )
+    with _ex2:
+        st.number_input(
+            "Min exploit profit % (on fair values)", 0, None, 5, step=5, key="arb_exploit_pct",
+            help="Fair value = the median of every site's corrected platform-wide value for an item.",
+        )
     arb_mine = st.checkbox("Only trades I can make with my inventory", value=True, key="arb_mine")
     st.checkbox("🔁 Also search arbitrage on every live scan (runs alongside the live checker)", value=False, key="arb_auto")
     if st.button("⚖️ Find Arbitrage", use_container_width=True, key="arb_btn"):
@@ -1543,6 +1558,27 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
             st.dataframe(pd.DataFrame(_g["summary"]), use_container_width=True, hide_index=True)
         else:
             st.info("No items with a big enough value gap in the data scanned.")
+        _ex = _arb.get("exploits")
+        if _ex is not None:
+            st.subheader(f"🎯 Gap exploits ({len(_ex)})")
+            st.caption(
+                "Trades that cash in on the value gaps above. Every item is valued at its **fair value**: "
+                "each site's number with that site's platform-wide price level removed, then the median "
+                "across sites. **Buy underpriced** = a poster on a site that undervalues the gap item gives "
+                "it to you cheap. **Sell overpriced** = a poster on a site that overvalues it pays a lot for "
+                "it. **Round trip** = buy it on the cheap site (Link 1) and sell that same item on the dear "
+                "site (Link 2); you only need what Link 1 asks for."
+            )
+            if _ex:
+                st.dataframe(
+                    pd.DataFrame(_ex), use_container_width=True, hide_index=True,
+                    column_config={
+                        "Link 1": st.column_config.LinkColumn("Link 1"),
+                        "Link 2": st.column_config.LinkColumn("Link 2"),
+                    },
+                )
+            else:
+                st.info("No exploitable gap trades right now.")
 
     st.fragment(run_every=3 if worker is not None else None)(_arb_panel)()
 

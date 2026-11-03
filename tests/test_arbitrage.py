@@ -160,3 +160,93 @@ def test_platform_wide_table_pools_all_classes_into_one_level() -> None:
     assert t["corrected"][0]["Trade Hub"] == "181 (1.82x)"          # Natural fruits run +10% -> 200 / 1.10
     assert t["platform"][0]["Trade Hub"] == "133 (1.33x)"           # one pooled +50% level -> 200 / 1.50
     assert "platform" not in _gap_tables([g], ["gamersberg", "tradehub"])
+
+
+# ------------------------------------------------------------- gap exploits
+def _gap_book():
+    """tradehub prices everything +10% vs Gamersberg (its platform-wide level), except X which it
+    prices 2x. On the corrected platform-wide scale X is ~182 on tradehub vs 100 on Gamersberg:
+    cheap on Gamersberg, dear on tradehub. Every other item agrees once the +10% is removed."""
+    def mk(n, gb, i):
+        return CatalogItem(id=i, name=n, type="Natural", values={"gamersberg": gb, "tradehub": round(gb * 1.1)})
+    A, B, C, D = mk("A", 100, 1), mk("B", 200, 2), mk("C", 300, 3), mk("D", 400, 4)
+    X = CatalogItem(id=5, name="X", type="Natural", values={"gamersberg": 100, "tradehub": 200})
+    pad = [_l("pad1", [A], [B]), _l("pad2", [C], [D])]
+    return A, B, C, D, X, pad
+
+
+def test_gap_exploit_fair_values_strip_platform_inflation() -> None:
+    from blox_trade_finder.core.arbitrage import fair_values, platform_corrected_values
+    A, B, C, D, X, pad = _gap_book()
+    corr = platform_corrected_values(pad + [_l("x", [A], [X])])
+    assert round(corr["a"]["tradehub"]) == 100 and round(corr["x"]["tradehub"]) == 182   # 110/1.1, 200/1.1
+    fair = fair_values(corr)
+    assert round(fair["a"]) == 100 and round(fair["x"]) == 141                        # median of 100 and 182
+
+
+def test_gap_exploit_buy_cheap_on_underpricing_site() -> None:
+    from blox_trade_finder.core.arbitrage import find_gap_exploits
+    A, B, C, D, X, pad = _gap_book()
+    buy = _l("buy", [A], [X], source="gamersberg")      # Gamersberg poster: X for A, fair 141 vs 100
+    res = [e for e in find_gap_exploits(pad + [buy]) if e.legs == [buy]]
+    assert len(res) == 1
+    e = res[0]
+    assert (e.kind, e.item, e.cheap_on, e.dear_on) == ("buy", "X", ["Gamersberg"], ["Trade Hub"])
+    assert round(e.cost) == 100 and round(e.revenue) == 141 and round(e.profit_pct, 2) == 0.41
+
+
+def test_gap_exploit_sell_dear_on_overpricing_site() -> None:
+    from blox_trade_finder.core.arbitrage import find_gap_exploits
+    A, B, C, D, X, pad = _gap_book()
+    sell = _l("sell", [X], [B], source="tradehub")       # tradehub poster pays B (fair 200) for X (fair 141)
+    res = [e for e in find_gap_exploits(pad + [sell]) if e.legs == [sell]]
+    assert len(res) == 1 and res[0].kind == "sell" and round(res[0].profit_pct, 2) == 0.42
+    # the same trade posted on Gamersberg (which underprices X) is not an exploit of the gap
+    same_on_gb = _l("sell2", [X], [B], source="gamersberg")
+    assert not [e for e in find_gap_exploits(pad + [same_on_gb]) if e.legs == [same_on_gb]]
+
+
+def test_gap_exploit_round_trip_buys_cheap_sells_dear() -> None:
+    from blox_trade_finder.core.arbitrage import find_gap_exploits
+    A, B, C, D, X, pad = _gap_book()
+    buy = _l("buy", [B], [X], source="gamersberg")       # pay B (200) for X: a LOSS on its own (X = 141)
+    sell = _l("sell", [X], [C], source="tradehub")       # get C (300) for X
+    res = find_gap_exploits(pad + [buy, sell])
+    rounds = [e for e in res if e.kind == "round"]
+    assert len(rounds) == 1
+    r = rounds[0]
+    assert r.legs == [buy, sell] and r.pay == [B] and r.receive == [C]
+    assert round(r.cost) == 200 and round(r.revenue) == 300 and r.profit == 100
+    assert not [e for e in res if e.legs == [buy]]       # the losing buy leg alone is not listed
+
+
+def test_gap_exploit_respects_inventory_and_min_edge() -> None:
+    from blox_trade_finder.core.arbitrage import find_gap_exploits
+    A, B, C, D, X, pad = _gap_book()
+    buy = _l("buy", [A], [X], source="gamersberg")
+    assert find_gap_exploits(pad + [buy], inventory_counts=Counter({"b": 1})) == []     # can't pay A
+    assert find_gap_exploits(pad + [buy], inventory_counts=Counter({"a": 1}))
+    assert find_gap_exploits(pad + [buy], min_edge=2.0) == []                          # X's gap is 1.82x
+
+
+def test_gap_exploit_ignores_pure_site_inflation() -> None:
+    """A site that prices EVERYTHING 10% higher is not a gap: nothing to exploit."""
+    from blox_trade_finder.core.arbitrage import find_gap_exploits
+    A, B, C, D, X, pad = _gap_book()
+    trades = [_l("t1", [A], [B], source="tradehub"), _l("t2", [B], [C], source="gamersberg")]
+    assert find_gap_exploits(pad + trades, min_edge=1.05) == []
+
+
+def test_arb_view_has_exploits_table() -> None:
+    from blox_trade_finder.live import build_arb_view
+    A, B, C, D, X, pad = _gap_book()
+    buy = _l("buy", [B], [X], source="gamersberg")
+    sell = _l("sell", [X], [C], source="tradehub")
+    v = build_arb_view(pad + [buy, sell], cfg={**_gap_cfg(), "exploit_edge": 1.10, "exploit_pct": 0.05},
+                       inventory_counts=Counter(), scam_cfg=None)
+    rows = v["exploits"]
+    r = next(r for r in rows if r["Type"].startswith("Round"))
+    assert r["Gap item"] == "X" and r["You pay"] == "B" and r["You get"] == "C"
+    assert r["Cheap on"] == "Gamersberg" and r["Dear on"] == "Trade Hub"
+    assert r["Profit (fair)"] == "100 (+50%)" and r["Gap"] == "1.82x"
+    assert r["Link 1"] == "u" and r["Link 2"] == "u"

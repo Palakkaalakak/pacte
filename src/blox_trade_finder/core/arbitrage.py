@@ -332,3 +332,182 @@ def find_item_arbitrage(
         out.extend(a for _, _, a in top)
     out.sort(key=(lambda a: -a.vs_norm) if judge_by_norm else (lambda a: -a.profit_pct))
     return out
+
+
+# ------------------------------------------------------------- gap exploits
+# A value gap is only worth something if you can TRADE through it. Posters price items with
+# their own site's numbers, so a site that undervalues item X (on the corrected platform-wide
+# scale) has posters who give X away cheaply, and a site that overvalues X has posters who pay a
+# lot for it. Every trade is judged on ONE fair scale: each site's number divided by that site's
+# platform-wide price level (see platform_wide_inflation), then the median across sites. That
+# strips both the site's general inflation and its quirks, so a profit here is not just
+# "site A's numbers are bigger".
+
+@dataclass
+class GapExploit:
+    kind: str                 # "buy" (get X cheap), "sell" (sell X dear) or "round" (buy + sell X)
+    item: str
+    edge: float               # X's corrected platform-wide gap: dearest site / cheapest site
+    cheap_on: list[str]       # sites (display names) that price X below its fair value
+    dear_on: list[str]        # sites that price X above its fair value
+    legs: list[Listing]       # 1 listing, or [buy, sell] for a round trip
+    pay: list[CatalogItem]    # what you hand over (for a round trip: the buy leg's ask)
+    receive: list[CatalogItem]  # what you end up with (round trip: the sell leg's offer)
+    cost: float               # fair value of `pay`
+    revenue: float            # fair value of `receive`
+
+    @property
+    def profit(self) -> int:
+        return round(self.revenue) - round(self.cost)   # matches the rounded cost/value shown
+
+    @property
+    def profit_pct(self) -> float:
+        return (self.revenue - self.cost) / self.cost if self.cost else 0.0
+
+    @property
+    def oldest_minutes(self) -> float:
+        now = datetime.now(timezone.utc)
+        return max(
+            (now - (l.created_at if l.created_at.tzinfo else l.created_at.replace(tzinfo=timezone.utc))).total_seconds() / 60
+            for l in self.legs
+        )
+
+
+def platform_corrected_values(listings: list[Listing]) -> dict[str, dict[str, float]]:
+    """item (lower) -> site -> that site's value divided by the site's platform-wide price level
+    (Gamersberg's scale). Sites with too few shared items to measure a level are left as-is."""
+    wide = platform_wide_inflation(listings)
+    out: dict[str, dict[str, float]] = {}
+    for lower, (_, _, vals) in _item_table(listings).items():
+        row = {}
+        for k, v in vals.items():
+            level, n = wide.get(k, (1.0, 0))
+            row[k] = v / level if (level and n >= MIN_CLASS_ITEMS) else float(v)
+        if row:
+            out[lower] = row
+    return out
+
+
+def fair_values(corrected: dict[str, dict[str, float]]) -> dict[str, float]:
+    """item (lower) -> fair value: median of every site's corrected platform-wide value."""
+    import statistics
+    return {lower: statistics.median(row.values()) for lower, row in corrected.items() if row}
+
+
+def find_gap_exploits(
+    listings: list[Listing],
+    *,
+    min_edge: float = 1.10,
+    min_pct: float = 0.05,
+    max_age_minutes: float | None = None,
+    inventory_counts: Counter[str] | None = None,
+    per_item: int = 5,
+    now: datetime | None = None,
+) -> list[GapExploit]:
+    """Trades that cash in on value gaps, valued on corrected platform-wide (fair) values.
+
+      buy   - a listing on a site that UNDERprices gap item X gives X; you pay its ask.
+      sell  - a listing on a site that OVERprices X wants X; you hand X over, take its offer.
+      round - buy X on an underpricing site and sell that same X on an overpricing one; X only
+              passes through your hands, so you only need what the buy leg asks for.
+
+    Only items whose corrected platform-wide gap is >= `min_edge` count, and every trade must
+    profit >= `min_pct` on fair values. `inventory_counts` keeps only trades you can pay for.
+    Price levels are measured on the whole book; `max_age_minutes` only limits which listings
+    can be traded."""
+    corrected = platform_corrected_values(listings)       # full book: more data, steadier levels
+    fair = fair_values(corrected)
+    gaps: dict[str, tuple[float, set[str], set[str]]] = {}
+    for lower, row in corrected.items():
+        if len(row) < 2 or min(row.values()) <= 0:
+            continue
+        edge = max(row.values()) / min(row.values())
+        if edge >= min_edge:
+            f = fair[lower]
+            gaps[lower] = (edge, {k for k, v in row.items() if v < f}, {k for k, v in row.items() if v > f})
+    if not gaps:
+        return []
+
+    now = now or datetime.now(timezone.utc)
+    if max_age_minutes:
+        def _fresh(l: Listing) -> bool:
+            c = l.created_at if l.created_at.tzinfo else l.created_at.replace(tzinfo=timezone.utc)
+            return (now - c).total_seconds() <= max_age_minutes * 60
+        listings = [l for l in listings if _fresh(l)]
+
+    def fv(items: list[CatalogItem]) -> float | None:
+        total = 0.0
+        for i in items:
+            v = fair.get(i.name.lower())
+            if not v:
+                return None                                # an unpriced item: can't judge the trade
+            total += v
+        return total
+
+    def can_pay(items: list[CatalogItem]) -> bool:
+        if inventory_counts is None:
+            return True
+        need = Counter(i.name.lower() for i in items)
+        return all(inventory_counts.get(n, 0) >= q for n, q in need.items())
+
+    def names(lower: set[str]) -> list[str]:
+        return sorted(SITE_VALUE_KEYS.get(k, k) for k in lower)
+
+    def make(kind: str, key: str, legs: list[Listing], pay, receive, cost: float, rev: float) -> GapExploit:
+        edge, cheap, dear = gaps[key]
+        display = next(i.name for l in legs for i in (*l.give, *l.want) if i.name.lower() == key)
+        return GapExploit(kind, display, edge, names(cheap), names(dear), legs, list(pay), list(receive), cost, rev)
+
+    singles: list[GapExploit] = []
+    buys: dict[str, list[tuple[float, Listing]]] = {}
+    sells: dict[str, list[tuple[float, Listing]]] = {}
+    for lst in listings:
+        if not lst.give or not lst.want:
+            continue
+        give_v, want_v = fv(lst.give), fv(lst.want)
+        if not give_v or not want_v:
+            continue
+        src = lst.source
+        # The gap item this poster misprices most: underpriced in what they give (you buy it
+        # cheap), overpriced in what they want (you sell it dear).
+        cheap_hits = [k for k in {i.name.lower() for i in lst.give} if k in gaps and src in gaps[k][1]]
+        dear_hits = [k for k in {i.name.lower() for i in lst.want} if k in gaps and src in gaps[k][2]]
+        payable = can_pay(lst.want)
+        if (cheap_hits or dear_hits) and payable and (give_v - want_v) / want_v >= min_pct:
+            if cheap_hits:
+                key = max(cheap_hits, key=lambda k: gaps[k][0])
+                singles.append(make("buy", key, [lst], lst.want, lst.give, want_v, give_v))
+            else:
+                key = max(dear_hits, key=lambda k: gaps[k][0])
+                singles.append(make("sell", key, [lst], lst.want, lst.give, want_v, give_v))
+        # Round-trip legs: exactly one X changes hands on each side.
+        if len(lst.give) == 1 and cheap_hits and payable:
+            buys.setdefault(cheap_hits[0], []).append((want_v, lst))
+        if len(lst.want) == 1 and dear_hits:
+            sells.setdefault(dear_hits[0], []).append((give_v, lst))
+
+    rounds: list[GapExploit] = []
+    for key, buy_list in buys.items():
+        sell_list = sells.get(key)
+        if not sell_list:
+            continue
+        buy_list.sort(key=lambda x: x[0])                     # cheapest ask first
+        sell_list.sort(key=lambda x: x[0], reverse=True)      # richest offer first
+        found: list[GapExploit] = []
+        for cost, buy in buy_list:
+            if (sell_list[0][0] - cost) / cost < min_pct:
+                break                                         # asks only rise from here
+            for rev, sell in sell_list:
+                if (rev - cost) / cost < min_pct:
+                    break                                     # offers only fall from here
+                if buy is sell:
+                    continue
+                found.append(make("round", key, [buy, sell], buy.want, sell.give, cost, rev))
+                break                                         # best sell for this buy
+            if len(found) >= per_item:
+                break
+        rounds.extend(found)
+
+    out = rounds + singles
+    out.sort(key=lambda e: (-e.profit_pct, -e.profit))
+    return out
