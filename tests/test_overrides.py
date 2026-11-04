@@ -28,3 +28,21 @@ def test_value_inventory_uses_override() -> None:
     rows = value_inventory(Inventory(items=[InventoryEntry(name="Tiger", qty=2)]), cat, "gamersberg",
                            build_overrides({"Tiger"}))
     assert rows[0].total == 280_000_000
+
+
+def test_parse_amount_and_editable_rows(tmp_path) -> None:
+    from blox_trade_finder.core.overrides import default_rows, load_rows, overrides_from_rows, parse_amount, save_rows
+    assert [parse_amount(x) for x in ("140m", "3.5B", "12k", "500000", "1,200", "x", "")] == [
+        140_000_000, 3_500_000_000, 12_000, 500_000, 1_200, None, None]
+    path = tmp_path / "cv.json"
+    assert load_rows(path)[0]["item"] == "Dragon (West)"                # nothing saved -> defaults
+    rows = default_rows()
+    rows[0].update(value=4_000_000_000, use=True)                         # user edits West Dragon and ticks it
+    rows.append({"item": "My Fruit", "demand": 12, "value": "2.5b", "use": True})
+    save_rows([r for r in rows if isinstance(r["value"], int)], path)
+    assert load_rows(path)[0]["value"] == 4_000_000_000
+    ov = overrides_from_rows(rows)
+    assert ov["dragon (west)"] == (10, 4_000_000_000) and ov["tiger"] == (9, 140_000_000)
+    assert ov["my fruit"] == (10, 2_500_000_000)                          # demand clamped to 0-10, text value parsed
+    assert "kitsune" not in ov                                            # not ticked -> not overridden
+    assert overrides_from_rows([{"item": "X", "demand": 5, "value": "abc", "use": True}]) == {}

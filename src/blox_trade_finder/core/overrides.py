@@ -1,6 +1,9 @@
 """Custom item values that replace the sites' numbers for chosen items."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from blox_trade_finder.models import CatalogItem, Listing
 
 # name -> (demand out of 10, value). Names are matched case-insensitively.
@@ -26,6 +29,61 @@ CUSTOM_VALUES: dict[str, tuple[int, int]] = {
     "Shadow": (5, 6_000_000),
 }
 DEFAULT_OVERRIDDEN = ("Tiger", "Yeti")  # on by default when the toggle is enabled
+
+
+CUSTOM_VALUES_PATH = Path(__file__).resolve().parents[3] / "config" / "custom_values.json"
+
+
+def parse_amount(text) -> int | None:
+    """'140m' -> 140_000_000, '3.5B' -> 3_500_000_000, '12k' -> 12_000, '500000' -> 500_000.
+    Plain numbers are exact amounts (unlike the millions-based money boxes elsewhere).
+    None if it can't be read."""
+    if isinstance(text, (int, float)):
+        return int(text)
+    raw = str(text or "").strip().lower().replace(",", "").replace("_", "").replace(" ", "")
+    mult = {"k": 1e3, "m": 1e6, "b": 1e9, "t": 1e12}
+    try:
+        if raw and raw[-1] in mult:
+            return int(round(float(raw[:-1]) * mult[raw[-1]]))
+        return int(round(float(raw)))
+    except ValueError:
+        return None
+
+
+def default_rows() -> list[dict]:
+    return [
+        {"item": n, "demand": d, "value": v, "use": n in DEFAULT_OVERRIDDEN}
+        for n, (d, v) in CUSTOM_VALUES.items()
+    ]
+
+
+def load_rows(path: Path = CUSTOM_VALUES_PATH) -> list[dict]:
+    """The editable table: [{item, demand (0-10), value (units), use (bool)}]. Falls back to the
+    built-in defaults when nothing has been saved (or the file is unreadable)."""
+    try:
+        rows = json.loads(Path(path).read_text(encoding="utf-8"))
+        if isinstance(rows, list) and rows:
+            return [{"item": str(r["item"]), "demand": int(r.get("demand", 5)),
+                     "value": int(r["value"]), "use": bool(r.get("use", False))} for r in rows]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return default_rows()
+
+
+def save_rows(rows: list[dict], path: Path = CUSTOM_VALUES_PATH) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+
+
+def overrides_from_rows(rows: list[dict]) -> dict[str, tuple[int, int]]:
+    """Only rows ticked `use` with a readable, positive value become overrides."""
+    out: dict[str, tuple[int, int]] = {}
+    for r in rows:
+        name = str(r.get("item") or "").strip().lower()
+        value = parse_amount(r.get("value"))
+        if name and r.get("use") and value and value > 0:
+            out[name] = (max(0, min(10, int(r.get("demand") or 0))), value)
+    return out
 
 
 def build_overrides(names: list[str] | set[str]) -> dict[str, tuple[int, int]]:

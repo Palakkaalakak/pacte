@@ -40,7 +40,10 @@ import streamlit as st
 
 from blox_trade_finder.models import Goals, Inventory, InventoryEntry
 from blox_trade_finder.live import NEW_HIGHLIGHT_SECONDS, build_arb_view, NOTIFY_MAX_AGE_MINUTES, LiveWorker, DEFAULT_BLOCKED_ITEMS, build_view, filter_chains, filter_listings
-from blox_trade_finder.core.overrides import CUSTOM_VALUES, DEFAULT_OVERRIDDEN, build_overrides
+from blox_trade_finder.core.overrides import (
+    default_rows as default_custom_rows, load_rows as load_custom_rows, overrides_from_rows,
+    parse_amount, save_rows as save_custom_rows,
+)
 from blox_trade_finder.scan import ScanProgress, run_scan
 from blox_trade_finder.sources.extra_sites import EXTRA_SITES, PERIPHERY_SITES
 from blox_trade_finder.sources.gamersberg import GamersbergSource
@@ -826,19 +829,48 @@ else:
 
 # ------------------------------------------------------------ custom values
 with st.expander("🧮 Custom item values (override the sites' numbers)"):
-    use_custom = st.toggle("Use my own values instead of Gamersberg's for the items below", value=False, key="use_custom")
-    custom_names = st.multiselect(
-        "Override these items", list(CUSTOM_VALUES.keys()), default=list(DEFAULT_OVERRIDDEN),
-        disabled=not use_custom, key="custom_names",
+    use_custom = st.toggle("Use my own values instead of the sites' for the ticked items below", value=False, key="use_custom")
+    st.caption("Edit the table directly: change a demand or value (type 140M, 3.5B, 12K or a plain number), tick "
+               "**Use** on the items you want overridden, add rows at the bottom, delete rows with the trash icon. "
+               "Edits apply straight away; press **Save** to keep them for next time.")
+    if "custom_rows" not in st.session_state:
+        st.session_state["custom_rows"] = load_custom_rows()
+    _cv_df = pd.DataFrame([{
+        "Item": r["item"], "Demand (0-10)": r["demand"], "Value": format_value(r["value"]), "Use": r["use"],
+    } for r in st.session_state["custom_rows"]])
+    _cv_edit = st.data_editor(
+        _cv_df, num_rows="dynamic", use_container_width=True, hide_index=True, key="custom_editor",
+        column_config={
+            "Item": st.column_config.TextColumn("Item", required=True),
+            "Demand (0-10)": st.column_config.NumberColumn("Demand (0-10)", min_value=0, max_value=10, step=1, default=5),
+            "Value": st.column_config.TextColumn("Value", help="e.g. 140M, 3.5B, 12K or a plain number", default="10M"),
+            "Use": st.column_config.CheckboxColumn("Use", default=True),
+        },
     )
-    st.dataframe(
-        pd.DataFrame([{
-            "Item": n, "Demand": f"{d}/10", "Value": format_value(v),
-            "Active": "✅" if use_custom and n in custom_names else "",
-        } for n, (d, v) in CUSTOM_VALUES.items()]),
-        use_container_width=True, hide_index=True,
-    )
-custom_values = build_overrides(custom_names) if use_custom else None
+    _rows_now, _bad = [], []
+    for _, _r in _cv_edit.iterrows():
+        _name = str(_r.get("Item") or "").strip()
+        if not _name or _name.lower() == "nan":
+            continue
+        _val = parse_amount(_r.get("Value"))
+        if _val is None or _val <= 0:
+            _bad.append(_name)
+        _rows_now.append({
+            "item": _name, "demand": int(_r.get("Demand (0-10)") or 0) if pd.notna(_r.get("Demand (0-10)")) else 5,
+            "value": _val or 0, "use": bool(_r.get("Use")),
+        })
+    if _bad:
+        st.warning("Couldn't read a value for: " + ", ".join(_bad) + " — those rows are ignored until fixed.")
+    _c1, _c2 = st.columns(2)
+    if _c1.button("💾 Save table", use_container_width=True, key="custom_save"):
+        save_custom_rows([r for r in _rows_now if r["value"] > 0])
+        st.session_state["custom_rows"] = [r for r in _rows_now if r["value"] > 0]
+        st.success("Saved.")
+    if _c2.button("↩️ Reset to defaults", use_container_width=True, key="custom_reset"):
+        st.session_state["custom_rows"] = default_custom_rows()
+        st.session_state.pop("custom_editor", None)
+        st.rerun()
+custom_values = overrides_from_rows(_rows_now) if use_custom else None
 
 # ------------------------------------------------------------ account value
 @st.cache_resource(ttl=600)
