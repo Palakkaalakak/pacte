@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 import sys
 import time
 from datetime import datetime, timezone
@@ -844,6 +845,26 @@ else:
             else:
                 st.warning(t("save_needs_name_items"))
 
+# ------------------------------------------------------------ see with this extra
+real_inventory = inventory          # what you actually own (account value uses this)
+with st.expander("🧪 See with this extra (pretend you also own these)"):
+    st.caption("Pick fruits you DON'T have to see which trades you could make if you did. They are added to "
+               "the inventory above for every scan (Find Trades, live checker, chains, arbitrage) and never saved. "
+               "Trades that rely on them get a 🧪 in the results table. Account value still uses only what you own.")
+    _extra_names = st.multiselect("Extra items", _catalog_names(), key="extra_names")
+    _extra_entries = []
+    if _extra_names:
+        _cols = st.columns(min(4, len(_extra_names)))
+        for _i, _n in enumerate(_extra_names):
+            _q = _cols[_i % len(_cols)].number_input(_n, min_value=1, value=1, step=1, key=f"extra_qty_{_n}")
+            _extra_entries.append(InventoryEntry(name=_n, qty=int(_q)))
+        st.info("Scanning as if you also owned: " + ", ".join(f"{e.name} ×{e.qty}" for e in _extra_entries))
+if _extra_entries:
+    inventory = Inventory(items=[*real_inventory.items, *_extra_entries])   # counts merge by item name
+    st.session_state["extra_counts"] = {e.name.strip().lower(): e.qty for e in _extra_entries}
+else:
+    st.session_state["extra_counts"] = {}
+
 # ------------------------------------------------------------ custom values
 with st.expander("🧮 Custom item values (override the sites' numbers)"):
     use_custom = st.toggle("Use my own values instead of the sites' for the ticked items below", value=False, key="use_custom")
@@ -901,7 +922,7 @@ def _catalog_cached():
 
 with st.expander("💰 Account value"):
     st.caption("Values the inventory chosen above (preset or your own).")
-    if not inventory.items:
+    if not real_inventory.items:
         st.info(t("need_item_warning"))
     else:
         from blox_trade_finder.core.arbitrage import platform_inflation, platform_wide_inflation, value_maps
@@ -916,7 +937,7 @@ with st.expander("💰 Account value"):
                     _vsources += list(PERIPHERY_SITES)
                 with st.spinner("Fetching each site's newest ads to read their prices..."):
                     _vres = run_scan(
-                        inventory, Goals(any=True), sources=_vsources, deep=True, gb_max_pages=15,
+                        real_inventory, Goals(any=True), sources=_vsources, deep=True, gb_max_pages=15,
                         request_interval=0.25, extra_latest=True, bfv_latest=100, custom_values=None,
                     )
                 # Kept apart from trade scans: shallow in time, so chains/arbitrage must not reuse it.
@@ -947,7 +968,7 @@ with st.expander("💰 Account value"):
         )
         try:
             _rows = value_inventory(
-                inventory, _catalog_cached(), _av_basis, custom_values, _site_maps,
+                real_inventory, _catalog_cached(), _av_basis, custom_values, _site_maps,
                 platform_inflation(_scan_cache[1]) if _scan_cache else None,
                 platform_wide_inflation(_scan_cache[1]) if _scan_cache else None,
             )
@@ -1357,7 +1378,18 @@ def _render_view(view: dict) -> None:
     if not view["rows"]:
         st.info(t("no_matches"))
         return
+    extra = st.session_state.get("extra_counts") or {}
+    own = Counter()
+    for _e in real_inventory.items:
+        own[_e.name.strip().lower()] += _e.qty
+
+    def _needs_extra(give: str) -> str:
+        """Items of this trade you'd only have thanks to the pretend extras."""
+        need = Counter(n.strip().lower() for n in give.split(","))
+        return ", ".join(sorted(n for n, q in need.items() if n in extra and q > own[n]))
+
     df = pd.DataFrame([{
+        "🧪": ("🧪 " + _needs_extra(r["give"])) if extra and _needs_extra(r["give"]) else "",
         t("col_notify"): r["notify"], t("col_source"): r["source"],
         t("col_you_give"): r["give"], t("col_you_get"): r["get"],
         t("col_profit"): r["delta"], t("col_profit_pct"): r["pct"],
