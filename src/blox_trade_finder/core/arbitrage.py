@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 
 from blox_trade_finder.models import CatalogItem, Listing
 
+from blox_trade_finder.core.reference import get_reference
+
 GB, BFV = "gamersberg", "bloxfruitsvalues"
 # Value columns that belong to a scanned site, with display names.
 SITE_VALUE_KEYS: dict[str, str] = {
@@ -41,7 +43,8 @@ def item_class(item: CatalogItem) -> str:
     return "Physical fruits"
 
 
-REFERENCE = GB          # every site's level is expressed relative to Gamersberg's
+# Every site's price level is expressed relative to the REFERENCE site (core.reference.get_reference():
+# bloxfruitsvalues.com by default, switchable to Gamersberg).
 MIN_CLASS_ITEMS = 3     # fewer shared items than this => no reliable level, assume 1.0
 
 
@@ -172,11 +175,11 @@ def platform_inflation(listings: list[Listing]) -> dict[str, dict[str, tuple[flo
     import statistics
     ratios: dict[str, dict[str, list[float]]] = {}
     for _, cls, vals in _item_table(listings).values():
-        ref = vals.get(REFERENCE)
+        ref = vals.get(get_reference())
         if not ref:
             continue
         for k, v in vals.items():
-            if k != REFERENCE:
+            if k != get_reference():
                 ratios.setdefault(cls, {}).setdefault(k, []).append(v / ref)
     return {
         cls: {k: (statistics.median(r), len(r)) for k, r in by_site.items()}
@@ -184,13 +187,14 @@ def platform_inflation(listings: list[Listing]) -> dict[str, dict[str, tuple[flo
     }
 
 
-def site_norms(listings: list[Listing], value_basis: str = GB) -> dict[str, tuple[float, int]]:
+def site_norms(listings: list[Listing], value_basis: str | None = None) -> dict[str, tuple[float, int]]:
     """source -> (median of value(poster gives)/value(poster asks), listings used).
 
     Posters ask for more than they give (the taker's premium), and how much differs by site.
     Uniform changes in a value table cancel out in barter, but this spread does not, so it is
     the honest yardstick for 'is this deal good for THIS site?'."""
     import statistics
+    value_basis = value_basis or get_reference()
     maps = value_maps(listings)
     per: dict[str, list[float]] = {}
     for lst in listings:
@@ -207,11 +211,11 @@ def platform_wide_inflation(listings: list[Listing]) -> dict[str, tuple[float, i
     import statistics
     ratios: dict[str, list[float]] = {}
     for _, _, vals in _item_table(listings).values():
-        ref = vals.get(REFERENCE)
+        ref = vals.get(get_reference())
         if not ref:
             continue
         for k, v in vals.items():
-            if k != REFERENCE:
+            if k != get_reference():
                 ratios.setdefault(k, []).append(v / ref)
     return {k: (statistics.median(r), len(r)) for k, r in ratios.items()}
 
@@ -245,7 +249,7 @@ def item_gaps(listings: list[Listing], *, min_ratio: float = 1.001, min_gap: int
 def find_item_arbitrage(
     listings: list[Listing],
     *,
-    value_basis: str = GB,
+    value_basis: str | None = None,
     min_pct: float = 0.10,
     cross_site_only: bool = True,
     inventory_counts: Counter[str] | None = None,
@@ -259,6 +263,7 @@ def find_item_arbitrage(
     buy listing's `want`, receive the sell listing's `give`; X passes straight through.
     Both legs are valued with ONE common basis so the profit is real, not a valuation
     artifact. `inventory_counts` restricts buys to ones you can pay for."""
+    value_basis = value_basis or get_reference()
     maps = value_maps(listings)
     norms = {src: n for src, (n, _) in site_norms(listings, value_basis).items()}
     now = now or datetime.now(timezone.utc)

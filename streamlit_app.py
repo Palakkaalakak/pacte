@@ -40,6 +40,9 @@ import streamlit as st
 
 from blox_trade_finder.models import Goals, Inventory, InventoryEntry
 from blox_trade_finder.live import NEW_HIGHLIGHT_SECONDS, build_arb_view, NOTIFY_MAX_AGE_MINUTES, LiveWorker, DEFAULT_BLOCKED_ITEMS, build_view, filter_chains, filter_listings
+from blox_trade_finder.core.reference import (
+    DEFAULT_REFERENCE, REFERENCE_LABELS, REFERENCES, get_reference, set_reference,
+)
 from blox_trade_finder.core.overrides import (
     default_rows as default_custom_rows, load_rows as load_custom_rows, overrides_from_rows,
     parse_amount, save_rows as save_custom_rows,
@@ -745,6 +748,20 @@ st.session_state["lang"] = "it" if is_italian else "en"
 st.title("🍈 Blox Fruits Trade Finder")
 st.write(t("intro"))
 
+# Which site's values everything is measured against (matching, profit, chains, arbitrage, gaps,
+# account value). bloxfruitsvalues.com is the default; switch back to Gamersberg any time.
+reference = st.selectbox(
+    "Reference values — every comparison is measured against this site",
+    list(REFERENCES), index=list(REFERENCES).index(DEFAULT_REFERENCE),
+    format_func=lambda k: REFERENCE_LABELS[k], key="reference",
+)
+set_reference(reference)
+if st.session_state.get("_ref_prev") != reference:
+    # a new reference: the value-basis pickers should follow it instead of keeping the old default
+    for _k in ("arb_basis", "av_basis"):
+        st.session_state.pop(_k, None)
+    st.session_state["_ref_prev"] = reference
+
 # ---------------------------------------------------------------- inventory
 st.header(t("header_inventory"))
 
@@ -914,7 +931,8 @@ with st.expander("💰 Account value"):
         ) if c]
         _scan_cache = max(_candidates, key=lambda c: c[0]) if _candidates else None
         _site_maps = {k: m for k, m in value_maps(_scan_cache[1]).items() if m} if _scan_cache else {}
-        _av_options = ["gamersberg", "fruityblox", "bloxfruit", *[k for k in _site_maps if k != "gamersberg"], "average"]
+        _av_options = [reference, *[k for k in ("gamersberg", "bloxfruitsvalues") if k != reference], "fruityblox", "bloxfruit",
+                       *[k for k in _site_maps if k not in ("gamersberg", "bloxfruitsvalues")], "average"]
         if _scan_cache:   # needs scanned prices from several sites to measure each site's price level
             _av_options += [HIGHEST_ADJUSTED, HIGHEST_ADJUSTED_PLATFORM]
         _av_basis = st.selectbox(
@@ -963,6 +981,7 @@ goals_mode = st.radio(
 if goals_mode == t("mode_saved"):
     goals_choice = st.selectbox(t("saved_goals"), list(GOALS_PRESETS.keys()))
     goals = Goals.model_validate(_load_preset(GOALS_PRESETS[goals_choice])[0])
+    goals = goals.model_copy(update={"value_basis": reference})   # presets follow the chosen reference
     with st.expander(t("see_goals", name=goals_choice)):
         for line in _goals_preview_lines(goals):
             st.write(f"- {line}")
@@ -985,7 +1004,7 @@ else:
         value_basis_label = st.selectbox(
             t("value_source"),
             list(VALUE_BASIS_LABELS.values()),
-            index=0,
+            index=list(VALUE_BASIS_LABELS).index(reference),
             disabled=show_any,
         )
         value_basis = next(k for k, v in VALUE_BASIS_LABELS.items() if v == value_basis_label)
@@ -1157,7 +1176,7 @@ def _chain_cfg() -> dict:
 def _arb_cfg() -> dict:
     ss = st.session_state
     return dict(
-        value_basis=ss.get("arb_basis", "gamersberg"), min_pct=ss.get("arb_pct", 10) / 100,
+        value_basis=ss.get("arb_basis", get_reference()), min_pct=ss.get("arb_pct", 10) / 100,
         cross_site_only=ss.get("arb_cross", True), max_age_minutes=ss.get("arb_age", 10) or None,
         min_ratio=ss.get("arb_ratio", 1.001), only_mine=ss.get("arb_mine", True),
         judge_by_norm=ss.get("arb_norm", False), platform_table=ss.get("arb_platform", False),
@@ -1488,7 +1507,8 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
     )
     arb_cross = st.checkbox("Cross-site only (buy on one site, sell on the other)", value=True, key="arb_cross")
     arb_basis = st.selectbox(
-        "Value basis for profit", ["gamersberg", "bloxfruitsvalues", "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg", "bloxvalues"],
+        "Value basis for profit", [reference, *[k for k in ("gamersberg", "bloxfruitsvalues") if k != reference],
+                                   "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg", "bloxvalues"],
         format_func=lambda k: VALUE_BASIS_LABELS[k], key="arb_basis",
     )
     st.checkbox(

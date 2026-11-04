@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from blox_trade_finder.core.arbitrage import MIN_CLASS_ITEMS, SITE_VALUE_KEYS, item_class
 from blox_trade_finder.core.normalize import resolved_inventory_name
+from blox_trade_finder.core.reference import BFV, bfv_value, fetch_bfv_table, get_reference
 from blox_trade_finder.models import Catalog, Inventory
 
 BASES = ("gamersberg", "fruityblox", "bloxfruit")
@@ -49,14 +50,19 @@ def _highest_adjusted(values: dict[str, int], cls: str, basis: str, inflation: d
 
 
 def value_inventory(
-    inventory: Inventory, catalog: Catalog, basis: str = "gamersberg", custom_values: dict | None = None,
+    inventory: Inventory, catalog: Catalog, basis: str | None = None, custom_values: dict | None = None,
     site_maps: dict[str, dict[str, int]] | None = None,
     inflation: dict | None = None, wide_inflation: dict | None = None,
+    bfv_table: dict | None = None,
 ) -> list[ValuedItem]:
     """`site_maps` (arbitrage.value_maps) adds each site's own prices, harvested from scanned
     listings, so the account can be valued on FantasyBlox/Trade Hub/... numbers too."""
     # Catalog names can carry stray whitespace (e.g. "Scarlet Ghost "), so key on stripped names.
+    basis = basis or get_reference()          # default: whichever site is the reference
     by_name = {i.name.strip().lower(): i for i in catalog.items}
+    # bloxfruitsvalues.com's own list prices (almost) every item, including ones no scanned ad mentions.
+    needs_bfv = basis in (BFV, "average", HIGHEST_ADJUSTED, HIGHEST_ADJUSTED_PLATFORM) or bfv_table is not None
+    table = (fetch_bfv_table() if bfv_table is None else bfv_table) if needs_bfv else {}
     merged: dict[str, ValuedItem] = {}
     for entry in inventory.items:
         name = resolved_inventory_name(entry)
@@ -66,6 +72,10 @@ def value_inventory(
         for site, m in (site_maps or {}).items():
             if m.get(key, 0) > 0:
                 merged_values[site] = m[key]
+        if table:
+            bv, _ = bfv_value(name, table)
+            if bv > 0:
+                merged_values[BFV] = bv
         if basis in (HIGHEST_ADJUSTED, HIGHEST_ADJUSTED_PLATFORM):
             cls = item_class(item) if item else "Physical fruits"
             unit = _highest_adjusted(merged_values, cls, basis, inflation or {}, wide_inflation or {})

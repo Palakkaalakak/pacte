@@ -13,7 +13,8 @@ import time
 from datetime import datetime, timezone
 from typing import Callable
 
-from blox_trade_finder.core.arbitrage import REFERENCE, SITE_VALUE_KEYS, find_gap_exploits, find_item_arbitrage, item_gaps, platform_inflation, site_norms
+from blox_trade_finder.core.reference import get_reference
+from blox_trade_finder.core.arbitrage import SITE_VALUE_KEYS, find_gap_exploits, find_item_arbitrage, item_gaps, platform_inflation, site_norms
 from blox_trade_finder.core.chains import find_chains
 from blox_trade_finder.core.normalize import inventory_counts
 from blox_trade_finder.models import Goals, Inventory, Match
@@ -175,11 +176,11 @@ def _gap_tables(gaps: list, gap_cols: list[str], with_platform: bool = False) ->
     values, corrected, platform, summary = [], [], [], []
     for g in gaps:
         adj = g.adjusted or {k: float(v) for k, v in g.values.items()}
-        ref_nominal = g.values.get(REFERENCE) or min(g.values.values())
-        ref_adj = adj.get(REFERENCE) or min(adj.values())
+        ref_nominal = g.values.get(get_reference()) or min(g.values.values())
+        ref_adj = adj.get(get_reference()) or min(adj.values())
         v_row, c_row, p_row = {"Item": g.name}, {"Item": g.name}, {"Item": g.name}
         adj_p = g.adjusted_platform or {k: float(v) for k, v in g.values.items()}
-        ref_p = adj_p.get(REFERENCE) or min(adj_p.values())
+        ref_p = adj_p.get(get_reference()) or min(adj_p.values())
         for k in gap_cols:
             label = SITE_VALUE_KEYS[k]
             v_row[label] = f"{format_value(g.values[k])} ({g.values[k] / ref_nominal:.2f}x)" if k in g.values else ""

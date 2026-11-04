@@ -15,6 +15,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from blox_trade_finder.core.reference import get_reference
 from blox_trade_finder.models import Listing, ValueBasis
 
 MAX_CHAINS = 500
@@ -51,7 +52,7 @@ def find_chains(
     listings: list[Listing],
     inventory_counts: Counter[str],
     *,
-    value_basis: ValueBasis = "gamersberg",
+    value_basis: ValueBasis | None = None,   # None = the current reference site
     max_age_minutes: float = 5,
     max_steps: int | None = 3,  # None = unlimited (every item is visited at most once, so it terminates)
     min_profit: int = 0,
@@ -62,6 +63,7 @@ def find_chains(
 
     A chain is kept if it profits at least `min_profit` (end value - start
     value, > 0 when min_profit is 0) or ends on a name in `target_names`."""
+    value_basis = value_basis or get_reference()
     now = now or datetime.now(timezone.utc)
     targets = {n.lower() for n in (target_names or set())}
 

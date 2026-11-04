@@ -46,3 +46,35 @@ def test_parse_amount_and_editable_rows(tmp_path) -> None:
     assert ov["my fruit"] == (10, 2_500_000_000)                          # demand clamped to 0-10, text value parsed
     assert "kitsune" not in ov                                            # not ticked -> not overridden
     assert overrides_from_rows([{"item": "X", "demand": 5, "value": "abc", "use": True}]) == {}
+
+
+def test_reference_defaults_to_bloxfruitsvalues_and_can_switch_back() -> None:
+    from blox_trade_finder.core.reference import DEFAULT_REFERENCE, get_reference, set_reference
+    from blox_trade_finder.models import Goals
+    assert DEFAULT_REFERENCE == "bloxfruitsvalues" and Goals().value_basis == "bloxfruitsvalues"
+    set_reference("bloxfruitsvalues"); assert get_reference() == "bloxfruitsvalues"
+    set_reference("gamersberg"); assert get_reference() == "gamersberg"          # switching back works
+    import pytest
+    with pytest.raises(ValueError):
+        set_reference("fruityblox")
+
+
+def test_apply_reference_stamps_bfv_values_with_aliases_and_permanent() -> None:
+    from datetime import datetime, timezone
+    from blox_trade_finder.core.reference import apply_reference, bfv_value
+    from blox_trade_finder.models import CatalogItem, Listing
+    table = {"kitsune": {"reg": 450, "perm": 3900, "reg_demand": 10, "perm_demand": 9},
+             "magnet": {"reg": 700, "perm": 0, "reg_demand": 9, "perm_demand": None},
+             "eagle glacier": {"reg": 20, "perm": 0, "reg_demand": 3, "perm_demand": None}}
+    assert bfv_value("Kitsune", table) == (450, 10) and bfv_value("Permanent Kitsune", table) == (3900, 9)
+    assert bfv_value("Magnet Fruit", table)[0] == 700 and bfv_value("Glacier Eagle", table)[0] == 20   # aliases
+    assert bfv_value("Any", table) == (0, None)
+    mk = lambda n, gb: CatalogItem(id=1, name=n, demand=1, values={"gamersberg": gb})
+    l = Listing(id="1", source="g", url="u", poster_name="p", poster_rating=1.0, wfl={}, created_at=datetime.now(timezone.utc),
+                give=[mk("Permanent Kitsune", 5000), mk("Any", 0)], want=[mk("Magnet Fruit", 600)])
+    out = apply_reference([l], "bloxfruitsvalues", table)[0]
+    assert out.give[0].values == {"gamersberg": 5000, "bloxfruitsvalues": 3900} and out.give[0].demand == 9
+    assert "bloxfruitsvalues" not in out.give[1].values            # unpriced items are left alone
+    assert out.want[0].value("bloxfruitsvalues") == 700
+    assert l.give[0].values == {"gamersberg": 5000}                # originals untouched
+    assert apply_reference([l], "gamersberg", table) == [l]        # Gamersberg reference: nothing stamped

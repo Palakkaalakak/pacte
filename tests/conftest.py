@@ -39,3 +39,17 @@ def sample_trades_raw() -> list[dict]:
 @pytest.fixture
 def catalog_sse_text() -> str:
     return (FIXTURES / "catalog_sse_sample.txt").read_text(encoding="utf-8")
+
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _gamersberg_reference():
+    """Most tests were written when Gamersberg was the reference site. Pin it so they keep testing the
+    same maths; tests of the new default (bloxfruitsvalues.com) set it themselves."""
+    from blox_trade_finder.core.reference import DEFAULT_REFERENCE, set_reference
+    set_reference("gamersberg")
+    yield
+    set_reference(DEFAULT_REFERENCE)

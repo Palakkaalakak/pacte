@@ -20,6 +20,7 @@ from blox_trade_finder.core.normalize import (
     inventory_counts,
 )
 from blox_trade_finder.core.overrides import apply_overrides
+from blox_trade_finder.core.reference import apply_reference, get_reference
 from blox_trade_finder.models import Goals, Inventory, Match
 from blox_trade_finder.sources.bloxfruitsvalues import BloxFruitsValuesSource
 from blox_trade_finder.sources.extra_sites import EXTRA_SITES, PERIPHERY_SITES
@@ -82,6 +83,7 @@ def run_scan(
     bfv_latest: int | None = None,
     extra_latest: bool = False,
     max_age_minutes: float | None = None,
+    reference: str | None = None,
 ) -> ScanResult:
     """Fetch, normalize and match. `sources` defaults to all of VALID_SOURCES."""
     if sources is None:
@@ -184,6 +186,7 @@ def run_scan(
                 listings += site_listings
             except Exception as exc:
                 logger.warning("%s failed: %s: %s", sid, type(exc).__name__, exc)
+        listings = apply_reference(listings, reference or get_reference())  # every item on the reference's scale
         listings = apply_overrides(listings, custom_values)  # user-forced values replace the sites'
         inv_counts = inventory_counts(inventory)
         matches = find_matches(listings, inv_counts, goals)

@@ -89,7 +89,7 @@ class Listing(BaseModel):
 
 class Goals(BaseModel):
     any: bool = False  # if true, ignore every filter below entirely — see matcher.find_matches
-    value_basis: ValueBasis = "gamersberg"
+    value_basis: ValueBasis = "bloxfruitsvalues"
     min_profit: int | None = None
     min_profit_pct: float | None = None
     min_demand: int | None = None
