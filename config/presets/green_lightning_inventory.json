@@ -30,7 +30,7 @@
     },
     {
       "name": "Tiger",
-      "qty": 2
+      "qty": 1
     },
     {
       "name": "Blizzard",
@@ -41,16 +41,12 @@
       "qty": 1
     },
     {
-      "name": "Yeti",
-      "qty": 1
-    },
-    {
       "name": "T-Rex",
-      "qty": 2
+      "qty": 3
     },
     {
       "name": "Dough",
-      "qty": 1
+      "qty": 2
     },
     {
       "name": "Pain",
@@ -58,7 +54,7 @@
     },
     {
       "name": "Portal",
-      "qty": 1
+      "qty": 2
     },
     {
       "name": "Scarlet Ghost",
@@ -70,11 +66,11 @@
     },
      {
       "name": "Yellow Lightning",
-      "qty": 1
+      "qty": 2
     },
     {
       "name": "Venom",
-      "qty": 1
+      "qty": 2
     },
     {
       "name": "Control",
