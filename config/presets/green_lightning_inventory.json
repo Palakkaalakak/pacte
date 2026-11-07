@@ -26,7 +26,7 @@
     },
     {
       "name": "Gravity",
-      "qty": 3
+      "qty": 2
     },
     {
       "name": "Tiger",
@@ -64,9 +64,13 @@
       "name": "Yeti",
       "qty": 1
     },
-     {
+    {
       "name": "Yellow Lightning",
       "qty": 2
+    },
+    {
+      "name": "Lightning",
+      "qty": 1
     },
     {
       "name": "Venom",
