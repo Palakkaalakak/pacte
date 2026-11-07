@@ -29,10 +29,6 @@
       "qty": 2
     },
     {
-      "name": "Tiger",
-      "qty": 1
-    },
-    {
       "name": "Blizzard",
       "qty": 1
     },
@@ -66,7 +62,11 @@
     },
     {
       "name": "Yellow Lightning",
-      "qty": 2
+      "qty": 1
+    },
+    {
+      "name": "Starlight Gravity",
+      "qty": 1
     },
     {
       "name": "Lightning",
@@ -76,9 +76,5 @@
       "name": "Venom",
       "qty": 2
     },
-    {
-      "name": "Control",
-      "qty": 1
-    }
   ]
 }
