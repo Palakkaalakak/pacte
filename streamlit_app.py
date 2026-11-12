@@ -1522,56 +1522,56 @@ with st.expander(t("chain_header"), expanded=False):
     st.fragment(run_every=3 if worker is not None else None)(_chain_panel)()
 
 # ---------------------------------------------------------------- arbitrage
-with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
-    st.write(
-        "Same-item arbitrage: buy item X from one listing and sell the same X to another for more "
-        "(both legs valued on one common basis, ideally across the two sites). **Value gaps** lists "
-        "items the two sites price differently."
-    )
-    arb_pct = st.number_input("Min profit % (on either site's values)", 0, None, 10, step=5, key="arb_pct")
-    arb_ratio = st.number_input(
-        "Min gap after adjusting for site price levels (x, 1.001 = anything above the average)",
-        1.0, None, 1.001, step=0.01, format="%.3f", key="arb_ratio",
+with st.expander("⚖️ Price gaps & trades to do"):
+    st.markdown(
+        "**What this does.** Sites price the same fruit differently. This finds fruits that are cheap on "
+        "one site and dear on another, and trades you can do to cash in.\n\n"
+        "**How to use it.** Press **Find price gaps & trades**, then read the first table: each row is a "
+        "plan. *What to do* says where to buy or sell, *You give / You end up with* are the items, and "
+        "*Profit* is the value of what you end up with minus what you give (using the reference site's "
+        "numbers). Click **Step 1** (then **Step 2**) to open the listings.\n\n"
+        "The **price gaps** table shows where each fruit is cheapest and dearest. Gaps are *corrected*: "
+        "if a site prices everything ~15% high, that markup is removed first, so only real disagreements show."
     )
     arb_age = st.number_input(
-        "Max age of each listing (minutes, 0 = any)", 0, None, 10, step=1, key="arb_age",
+        "Ignore listings older than (minutes, 0 = any)", 0, None, 10, step=1, key="arb_age",
         help="Older ads are likely already filled or the poster is offline.",
     )
-    arb_cross = st.checkbox("Cross-site only (buy on one site, sell on the other)", value=True, key="arb_cross")
-    arb_basis = st.selectbox(
-        "Value basis for profit", [reference, *[k for k in ("gamersberg", "bloxfruitsvalues") if k != reference],
-                                   "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg", "bloxvalues"],
-        format_func=lambda k: VALUE_BASIS_LABELS[k], key="arb_basis",
-    )
-    st.checkbox(
-        "Judge edge against each site's usual deal (not just break-even)", value=False, key="arb_norm",
-        help="Every site's posters ask for more than they give, by a different margin. With this on, "
-             "'min profit %' is measured against the usual spread of the two sites involved "
-             "(real profit is still required).",
-    )
-    st.checkbox(
-        "Also show a 4th table corrected by each site's platform-wide inflation (all item classes pooled)",
-        value=False, key="arb_platform",
-        help="The 'Corrected' table adjusts per item class (e.g. limiteds vs permanents). This one uses a "
-             "single average level per site, measured against Gamersberg.",
-    )
-    st.markdown("**🎯 Gap exploits** (trades that cash in on the value gaps, judged on corrected platform-wide values)")
-    _ex1, _ex2 = st.columns(2)
-    with _ex1:
-        st.number_input(
-            "Min corrected gap to exploit (x)", 1.0, None, 1.10, step=0.05, format="%.2f", key="arb_exploit_edge",
-            help="Only items whose platform-wide corrected values differ by at least this much between "
-                 "sites. 1.10 = the dearest site prices it 10% above the cheapest, after removing each "
-                 "site's overall price level.",
-        )
-    with _ex2:
-        st.number_input(
-            "Min exploit profit % (on fair values)", 0, None, 5, step=5, key="arb_exploit_pct",
-            help="Fair value = the median of every site's corrected platform-wide value for an item.",
-        )
     arb_mine = st.checkbox("Only trades I can make with my inventory", value=True, key="arb_mine")
-    st.checkbox("🔁 Also search arbitrage on every live scan (runs alongside the live checker)", value=False, key="arb_auto")
-    if st.button("⚖️ Find Arbitrage", use_container_width=True, key="arb_btn"):
+    st.checkbox("🔁 Also update this on every live scan", value=False, key="arb_auto")
+    with st.expander("Advanced settings (you can leave these alone)"):
+        arb_pct = st.number_input("Min profit % for same-item trades", 0, None, 10, step=5, key="arb_pct")
+        arb_ratio = st.number_input(
+            "Smallest real price gap to list (x; 1.001 = anything above the sites' usual markup)",
+            1.0, None, 1.001, step=0.01, format="%.3f", key="arb_ratio",
+        )
+        arb_cross = st.checkbox("Same-item trades must buy on one site and sell on another", value=True, key="arb_cross")
+        arb_basis = st.selectbox(
+            "Values used to work out profit", [reference, *[k for k in ("gamersberg", "bloxfruitsvalues") if k != reference],
+                                              "fantasyblox", "tradehub", "tradebloxfruit", "bfvgg", "bloxvalues"],
+            format_func=lambda k: VALUE_BASIS_LABELS[k], key="arb_basis",
+        )
+        st.checkbox(
+            "Judge same-item trades against each site's usual deal (not just break-even)", value=False, key="arb_norm",
+            help="Posters ask for more than they give, by a different margin on each site. With this on, "
+                 "'min profit %' is measured against the usual margin of the two sites involved.",
+        )
+        st.checkbox(
+            "Also show the gap table corrected by one platform-wide level per site (instead of per kind of item)",
+            value=False, key="arb_platform",
+        )
+        _ex1, _ex2 = st.columns(2)
+        with _ex1:
+            st.number_input(
+                "Smallest corrected gap for 'gap' trades (x)", 1.0, None, 1.10, step=0.05, format="%.2f", key="arb_exploit_edge",
+                help="1.10 = the dearest site prices the fruit 10% above the cheapest, after removing each site's markup.",
+            )
+        with _ex2:
+            st.number_input(
+                "Min profit % for 'gap' trades", 0, None, 5, step=5, key="arb_exploit_pct",
+                help="Judged on fair values: the median of every site's corrected value.",
+            )
+    if st.button("⚖️ Find price gaps & trades", use_container_width=True, key="arb_btn", type="primary"):
         if not inventory.items:
             st.warning(t("need_item_warning"))
         else:
@@ -1603,66 +1603,59 @@ with st.expander("⚖️ Arbitrage (Gamersberg vs bloxfruitsvalues)"):
         if not cands:
             return
         _arb = max(cands, key=lambda v: v["ts"])
-        st.subheader(f"Arbitrage ({len(_arb['trades'])})")
-        if _arb["trades"]:
+        # 1) the plans: the thing you actually act on
+        _plan = _arb.get("plan", [])
+        st.subheader(f"✅ Trades to do ({len(_plan)})")
+        if _plan:
             st.dataframe(
-                pd.DataFrame(_arb["trades"]), use_container_width=True, hide_index=True,
-                column_config={
-                    "Buy link": st.column_config.LinkColumn("Buy link"),
-                    "Sell link": st.column_config.LinkColumn("Sell link"),
-                },
+                pd.DataFrame(_plan), use_container_width=True, hide_index=True,
+                column_config={"Step 1": st.column_config.LinkColumn("Step 1"), "Step 2": st.column_config.LinkColumn("Step 2")},
             )
         else:
-            st.info("No same-item arbitrage right now.")
-        if _arb.get("norms"):
-            st.subheader("Each site's usual spread")
-            st.caption("Typical value a poster gives ÷ value they ask for, in Gamersberg-scale numbers. Below 1.00 "
-                       "means posters on that site ask for more than they give. 'vs site norm' in the arbitrage "
-                       "table compares a deal with the usual round trip between its two sites.")
-            st.dataframe(pd.DataFrame(_arb["norms"]), use_container_width=True, hide_index=True)
-        if _arb.get("inflation"):
-            st.subheader("Platform price levels (vs Gamersberg)")
-            st.caption("Typical price ratio of each site against Gamersberg, per kind of item, with the number "
-                       "of items compared. 1.10x = that site prices the whole class ~10% higher, so a 10% gap "
-                       "there is normal. Value gaps below are adjusted for this.")
-            st.dataframe(pd.DataFrame(_arb["inflation"]), use_container_width=True, hide_index=True)
-        _g = _arb["gaps"]
-        st.subheader(f"Value gaps ({len(_g['summary'])})")
-        if _g["summary"]:
-            st.caption("Ratios are against Gamersberg. **Published** = each site's own number; **Corrected** = "
-                       "with that site's usual price level for this kind of item removed; **Summary** = the gap.")
-            st.markdown("**1 · Published values**")
-            st.dataframe(pd.DataFrame(_g["values"]), use_container_width=True, hide_index=True)
-            st.markdown("**2 · Corrected values** (per item class)")
-            st.dataframe(pd.DataFrame(_g["corrected"]), use_container_width=True, hide_index=True)
-            if "platform" in _g:
-                st.markdown("**3 · Corrected by platform-wide inflation** (one average level per site, all classes pooled)")
-                st.dataframe(pd.DataFrame(_g["platform"]), use_container_width=True, hide_index=True)
-            st.markdown(f"**{4 if 'platform' in _g else 3} · Gap summary**")
-            st.dataframe(pd.DataFrame(_g["summary"]), use_container_width=True, hide_index=True)
+            st.info("No profitable trades right now. Try a bigger 'ignore listings older than', or untick "
+                    "'Only trades I can make'.")
+        # 2) where the sites disagree, in plain terms
+        _dis = _arb.get("disagree", [])
+        st.subheader(f"📊 Price gaps ({len(_dis)})")
+        if _dis:
+            st.caption("Cheapest and priciest site for each fruit after removing each site's usual markup. "
+                       "*Real gap* = how much more the priciest site values it (amount, and ratio).")
+            st.dataframe(pd.DataFrame(_dis), use_container_width=True, hide_index=True)
         else:
-            st.info("No items with a big enough value gap in the data scanned.")
-        _ex = _arb.get("exploits")
-        if _ex is not None:
-            st.subheader(f"🎯 Gap exploits ({len(_ex)})")
-            st.caption(
-                "Trades that cash in on the value gaps above. Every item is valued at its **fair value**: "
-                "each site's number with that site's platform-wide price level removed, then the median "
-                "across sites. **Buy underpriced** = a poster on a site that undervalues the gap item gives "
-                "it to you cheap. **Sell overpriced** = a poster on a site that overvalues it pays a lot for "
-                "it. **Round trip** = buy it on the cheap site (Link 1) and sell that same item on the dear "
-                "site (Link 2); you only need what Link 1 asks for."
-            )
-            if _ex:
+            st.info("No fruits with a price gap in the data scanned.")
+        # 3) everything else, out of the way
+        with st.expander("Details & raw numbers (optional)"):
+            _g = _arb["gaps"]
+            st.caption("Ratios in brackets are against the reference site. **Published** = each site's own number; "
+                       "**Corrected** = with that site's usual markup for this kind of fruit removed.")
+            if _g["summary"]:
+                st.markdown("**Published values**")
+                st.dataframe(pd.DataFrame(_g["values"]), use_container_width=True, hide_index=True)
+                st.markdown("**Corrected values** (per kind of fruit)")
+                st.dataframe(pd.DataFrame(_g["corrected"]), use_container_width=True, hide_index=True)
+                if "platform" in _g:
+                    st.markdown("**Corrected by one platform-wide level per site**")
+                    st.dataframe(pd.DataFrame(_g["platform"]), use_container_width=True, hide_index=True)
+                st.markdown("**Gap summary**")
+                st.dataframe(pd.DataFrame(_g["summary"]), use_container_width=True, hide_index=True)
+            if _arb.get("inflation"):
+                st.markdown("**Each site's usual markup, per kind of fruit** (vs the reference site; number of fruits compared in brackets)")
+                st.dataframe(pd.DataFrame(_arb["inflation"]), use_container_width=True, hide_index=True)
+            if _arb.get("norms"):
+                st.markdown("**Each site's usual margin** (value a poster gives ÷ value they ask for; below 1.00 = they ask for more than they give)")
+                st.dataframe(pd.DataFrame(_arb["norms"]), use_container_width=True, hide_index=True)
+            if _arb["trades"]:
+                st.markdown("**Same-item trades, full columns**")
                 st.dataframe(
-                    pd.DataFrame(_ex), use_container_width=True, hide_index=True,
-                    column_config={
-                        "Link 1": st.column_config.LinkColumn("Link 1"),
-                        "Link 2": st.column_config.LinkColumn("Link 2"),
-                    },
+                    pd.DataFrame(_arb["trades"]), use_container_width=True, hide_index=True,
+                    column_config={"Buy link": st.column_config.LinkColumn("Buy link"), "Sell link": st.column_config.LinkColumn("Sell link")},
                 )
-            else:
-                st.info("No exploitable gap trades right now.")
+            if _arb.get("exploits"):
+                st.markdown("**Gap trades, full columns**")
+                st.dataframe(
+                    pd.DataFrame(_arb["exploits"]), use_container_width=True, hide_index=True,
+                    column_config={"Link 1": st.column_config.LinkColumn("Link 1"), "Link 2": st.column_config.LinkColumn("Link 2")},
+                )
 
     st.fragment(run_every=3 if worker is not None else None)(_arb_panel)()
 

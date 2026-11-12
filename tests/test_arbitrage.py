@@ -250,3 +250,29 @@ def test_arb_view_has_exploits_table() -> None:
     assert r["Cheap on"] == "Gamersberg" and r["Dear on"] == "Trade Hub"
     assert r["Profit (fair)"] == "100 (+50%)" and r["Gap"] == "1.82x"
     assert r["Link 1"] == "u" and r["Link 2"] == "u"
+
+
+def test_plan_and_disagree_rows_are_plain_and_merged() -> None:
+    from blox_trade_finder.live import build_arb_view
+    X = CatalogItem(id=1, name="X", values={"gamersberg": 100, "bloxfruitsvalues": 100})
+    W = CatalogItem(id=2, name="W", values={"gamersberg": 80, "bloxfruitsvalues": 80})
+    G = CatalogItem(id=3, name="G", values={"gamersberg": 120, "bloxfruitsvalues": 120})
+    buy = _l("buy", [W], [X], source="fantasyblox")
+    sell = _l("sell", [X], [G], source="tradehub")
+    cfg = dict(value_basis="gamersberg", min_pct=0.1, cross_site_only=True, max_age_minutes=None, min_ratio=1.001, only_mine=False)
+    v = build_arb_view([buy, sell], cfg=cfg, inventory_counts=Counter(), scam_cfg=None)
+    plan = v["plan"]
+    assert plan and plan[0]["What to do"] == "Buy X on FantasyBlox, then sell it on Trade Hub"
+    assert plan[0]["You give"] == "W" and plan[0]["You end up with"] == "G" and plan[0]["Profit"].endswith("(+50%)")
+    assert list(plan[0]) == ["What to do", "You give", "You end up with", "Profit", "Posted", "Step 1", "Step 2"]
+    keys = [(r["Step 1"], r["Step 2"]) for r in plan]
+    assert len(keys) == len(set(keys))                                    # the same pair is never listed twice
+
+
+def test_disagree_rows_name_cheapest_and_priciest_site() -> None:
+    from blox_trade_finder.live import _disagree_rows
+    a = CatalogItem(id=1, name="Venom", values={"gamersberg": 60_000_000, "tradehub": 25_000_000, "fantasyblox": 100_000_000})
+    g = item_gaps([_l("x", [CatalogItem(id=2, name="Pain", values={"gamersberg": 10})], [a])])[0]
+    row = _disagree_rows([g])[0]
+    assert row["Item"] == "Venom" and row["Cheapest on"] == "Trade Hub (25.00M)" and row["Priciest on"] == "FantasyBlox (100.00M)"
+    assert row["Real gap"] == "75.00M (4.00x)" and list(row) == ["Item", "Cheapest on", "Priciest on", "Real gap", "Kind"]

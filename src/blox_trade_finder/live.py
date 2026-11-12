@@ -231,6 +231,65 @@ def _exploit_rows(exploits: list) -> list[dict]:
     return rows
 
 
+def _site_name(source: str) -> str:
+    return SITE_VALUE_KEYS.get(source, source)
+
+
+def _plan_rows(trades: list, exploits: list) -> list[dict]:
+    """ONE simple list of things to do, merged from same-item arbitrage and gap exploits.
+    Each row says what to do in plain words, what you hand over, what you end up with and the
+    profit (value you get minus value you give, on the reference site's numbers)."""
+    rows, seen = [], set()
+    for x in trades:                                    # same item bought on one listing, sold on another
+        key = (x.buy.url, x.sell.url)
+        seen.add(key)
+        rows.append((x.profit_pct, {
+            "What to do": f"Buy {x.item} on {_site_name(x.buy.source)}, then sell it on {_site_name(x.sell.source)}",
+            "You give": ", ".join(i.name for i in x.buy.want),
+            "You end up with": ", ".join(i.name for i in x.sell.give),
+            "Profit": f"{format_value(x.profit)} ({x.profit_pct:+.0%})",
+            "Posted": f"{x.oldest_minutes:.0f}m ago",
+            "Step 1": x.buy.url, "Step 2": x.sell.url,
+        }))
+    for e in exploits:                                  # trades that cash in on a platform's mispricing
+        if e.kind == "round":
+            key = (e.legs[0].url, e.legs[1].url)
+            if key in seen:
+                continue
+            what = f"Buy {e.item} on {_site_name(e.legs[0].source)}, then sell it on {_site_name(e.legs[1].source)}"
+        elif e.kind == "buy":
+            what = f"Buy {e.item} on {_site_name(e.legs[0].source)} (cheap there)"
+        else:
+            what = f"Sell {e.item} on {_site_name(e.legs[0].source)} (pays well there)"
+        rows.append((e.profit_pct, {
+            "What to do": what,
+            "You give": ", ".join(i.name for i in e.pay),
+            "You end up with": ", ".join(i.name for i in e.receive),
+            "Profit": f"{format_value(e.profit)} ({e.profit_pct:+.0%})",
+            "Posted": f"{e.oldest_minutes:.0f}m ago",
+            "Step 1": e.legs[0].url, "Step 2": e.legs[1].url if len(e.legs) > 1 else None,
+        }))
+    rows.sort(key=lambda r: -r[0])
+    return [r for _, r in rows]
+
+
+def _disagree_rows(gaps: list) -> list[dict]:
+    """Where the sites disagree on an item's price, after removing each site's usual markup:
+    where it is cheapest, where it is dearest, and by how much."""
+    rows = []
+    for g in gaps:
+        adj = g.adjusted or {k: float(v) for k, v in g.values.items()}
+        lo, hi = min(adj, key=adj.get), max(adj, key=adj.get)
+        rows.append({
+            "Item": g.name,
+            "Cheapest on": f"{_site_name(lo)} ({format_value(int(adj[lo]))})",
+            "Priciest on": f"{_site_name(hi)} ({format_value(int(adj[hi]))})",
+            "Real gap": f"{format_value(g.gap)} ({g.ratio:.2f}x)",
+            "Kind": g.cls,
+        })
+    return rows
+
+
 def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dict | None) -> dict:
     """Arbitrage results as PLAIN rows (dicts/strings only). Plain data can never
     break the page after a redeploy changes a class, unlike stored objects."""
@@ -252,6 +311,8 @@ def build_arb_view(listings: list, *, cfg: dict, inventory_counts, scam_cfg: dic
     exploits = [e for e in exploits if not is_scam(e.profit, e.profit_pct, scam_cfg)]
     return {
         "ts": time.time(),
+        "plan": _plan_rows(trades[:300], exploits[:300])[:300],
+        "disagree": _disagree_rows(gaps[:300]),
         "gaps": _gap_tables(gaps[:300], gap_cols, cfg.get("platform_table", False)),
         "exploits": _exploit_rows(exploits[:300]),
         "trades": [{
