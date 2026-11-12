@@ -1,15 +1,15 @@
 {
   "items": [
     {
+      "name": "Yeti",
+      "qty": 1
+    },
+    {
       "name": "Venom",
       "qty": 1
     },
     {
-      "name": "Shadow",
-      "qty": 1
-    },
-    {
-      "name": "Gravity",
+      "name": "Starlight Gravity",
       "qty": 1
     },
     {
@@ -17,19 +17,19 @@
       "qty": 1
     },
     {
-      "name": "Dough",
+      "name": "Buddha",
       "qty": 1
     },
     {
-      "name": "Yeti",
-      "qty": 1
-    },
-    {
-      "name": "Hellfire Gas",
+      "name": "Portal",
       "qty": 1
     },
     {
       "name": "Lightning",
+      "qty": 1
+    },
+    {
+      "name": "Pain",
       "qty": 1
     }
   ]
